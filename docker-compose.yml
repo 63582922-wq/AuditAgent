@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: fxpg
+      POSTGRES_PASSWORD: fxpg
+      POSTGRES_DB: fxpg
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fxpg"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://fxpg:fxpg@postgres:5432/fxpg
+      STORAGE_PATH: /app/storage
+      API_KEY: ${API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_API_KEY: ${LLM_API_KEY:-${OPENAI_API_KEY:?LLM_API_KEY is required}}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      VISION_API_KEY: ${VISION_API_KEY:-}
+      VISION_BASE_URL: ${VISION_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+      VISION_MODEL: ${VISION_MODEL:-glm-4.6v}
+      ENABLE_LLM: ${ENABLE_LLM:-true}
+    volumes:
+      - storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE: http://localhost:8000/api
+      NEXT_PUBLIC_API_KEY: ${API_KEY:-}
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  storage:

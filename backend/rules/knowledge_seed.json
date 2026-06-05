@@ -1,0 +1,32 @@
+[
+  {
+    "memory_type": "accounting_knowledge",
+    "content": "企业接受虚开增值税专用发票的，可能面临行政罚款、进项税额转出，甚至刑事责任。",
+    "tags": ["税务风险", "票据风险", "invoice_list"]
+  },
+  {
+    "memory_type": "accounting_knowledge",
+    "content": "工资薪金支出应依法代扣代缴个人所得税，并按时进行社保公积金申报缴纳。",
+    "tags": ["税务风险", "payroll", "social_security"]
+  },
+  {
+    "memory_type": "risk_policy",
+    "content": "公户与私户混用、个人账户收取经营款项，应作为重点核查事项。",
+    "tags": ["银行流水风险", "bank_statement", "高"]
+  },
+  {
+    "memory_type": "risk_policy",
+    "content": "固定资产大额采购应核对合同、发票、验收单及入账金额是否一致。",
+    "tags": ["合同风险", "fixed_asset", "数据一致性风险"]
+  },
+  {
+    "memory_type": "accounting_knowledge",
+    "content": "收入确认应遵循权责发生制，关注跨期确认收入及增值税申报口径差异。",
+    "tags": ["会计核算风险", "tax_return", "financial_statement"]
+  },
+  {
+    "memory_type": "case_example",
+    "content": "某企业将次年费用提前入账，被调增应纳税所得额并加收滞纳金。",
+    "tags": ["会计核算风险", "expense_detail", "跨期"]
+  }
+]

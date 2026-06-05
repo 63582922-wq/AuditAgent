@@ -1,0 +1,20 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+python-multipart==0.0.20
+pydantic==2.10.4
+pydantic-settings==2.7.0
+openpyxl==3.1.5
+python-docx==1.1.2
+pymupdf==1.25.2
+pdfplumber==0.11.4
+pillow==11.0.0
+reportlab==4.2.5
+httpx==0.28.1
+rapidfuzz==3.11.0
+alembic==1.14.0
+
+# OCR（需系统安装 tesseract：brew install tesseract tesseract-lang）
+# pytesseract==0.3.13
+
+psycopg2-binary==2.9.10
