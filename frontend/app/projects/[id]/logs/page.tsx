@@ -27,7 +27,7 @@ export default function ProjectLogsPage() {
 
   return (
     <>
-      <PageTop title="日志" desc={`${logs.length} 条审计记录`} />
+      <PageTop title="Agent 日志" desc="Orchestrator、子 Agent 工具调用、Critic 与交付步骤记录" />
       <ActivityTimeline logs={logs} />
     </>
   );

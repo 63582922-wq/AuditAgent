@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 from typing import Optional
@@ -13,23 +14,43 @@ from app.auth import require_api_key
 from app.config import settings
 from app.database import get_db
 from app.exceptions import FXPGError
-from app.models import AgentRunLog, AnalysisJob, FileRecord, Memory, Output, Project, ReviewRecord, Risk, Rule
+from app.models import (
+    AgentRunLog,
+    AnalysisJob,
+    ExtractedEntity,
+    FileRecord,
+    Memory,
+    Output,
+    ParsedDocument,
+    Project,
+    RecordLink,
+    ReviewRecord,
+    Risk,
+    Rule,
+)
 from app.schemas import (
     AnalyzeResponse,
+    FileOut,
     JobOut,
     MemoryCreate,
     MemoryOut,
     ProjectCreate,
     ProjectDetail,
+    ProjectLiveOut,
     ProjectOut,
+    ProjectOverviewOut,
     ProjectSummary,
     ReviewCreate,
+    DeliverableReview,
+    ReanalyzeRequest,
     RiskOut,
     RuleCreate,
     RuleOut,
     StatsOut,
 )
+from app.services.agent.runtime import AgentRuntime
 from app.services.agent.workflow import AgentWorkflow
+from app.services.agent.memory_writer import write_review_memory
 from app.config import settings
 from app.services.agent.llm_client import llm_available, require_agent_llm
 from app.services.jobs.worker import create_job, enqueue_analysis
@@ -46,6 +67,8 @@ def agent_status():
     return {
         "mode": "agent_only",
         "ready": ready,
+        "execution_mode": settings.agent_execution_mode,
+        "react_max_turns": settings.react_max_turns,
         "text_model": settings.llm_model,
         "text_base_url": settings.text_base_url,
         "vision_model": settings.vision_model,
@@ -78,6 +101,78 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     if not project:
         raise HTTPException(404, "项目不存在")
     return project
+
+
+@router.get("/projects/{project_id}/live", response_model=ProjectLiveOut)
+def get_project_live(project_id: str, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    file_count = db.query(FileRecord).filter_by(project_id=project_id).count()
+    risk_count = db.query(Risk).filter_by(project_id=project_id).count()
+    output_count = db.query(Output).filter_by(project_id=project_id).count()
+    return ProjectLiveOut(
+        id=project.id,
+        name=project.name,
+        status=project.status,
+        summary=project.summary,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        state_json=project.state_json,
+        file_count=file_count,
+        risk_count=risk_count,
+        output_count=output_count,
+    )
+
+
+@router.get("/projects/{project_id}/overview", response_model=ProjectOverviewOut)
+def get_project_overview(project_id: str, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    files = (
+        db.query(FileRecord)
+        .filter_by(project_id=project_id)
+        .order_by(FileRecord.created_at)
+        .all()
+    )
+    risk_preview = (
+        db.query(Risk)
+        .filter_by(project_id=project_id)
+        .order_by(Risk.risk_score.desc())
+        .limit(6)
+        .all()
+    )
+    file_count = len(files)
+    risk_count = db.query(Risk).filter_by(project_id=project_id).count()
+    output_count = db.query(Output).filter_by(project_id=project_id).count()
+    return ProjectOverviewOut(
+        id=project.id,
+        name=project.name,
+        status=project.status,
+        summary=project.summary,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        state_json=project.state_json,
+        file_count=file_count,
+        risk_count=risk_count,
+        output_count=output_count,
+        files=files,
+        risk_preview=risk_preview,
+    )
+
+
+@router.get("/projects/{project_id}/files", response_model=list[FileOut])
+def list_project_files(project_id: str, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    return (
+        db.query(FileRecord)
+        .filter_by(project_id=project_id)
+        .order_by(FileRecord.created_at)
+        .all()
+    )
 
 
 @router.post("/projects/{project_id}/files")
@@ -166,16 +261,109 @@ def analyze_project(project_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/projects/{project_id}/jobs/latest", response_model=JobOut)
+@router.post("/projects/{project_id}/analyze-incremental", response_model=AnalyzeResponse)
+def analyze_incremental(project_id: str, db: Session = Depends(get_db)):
+    """补资料后增量分析：仅处理新上传文件并重跑受影响阶段。"""
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    state = project.state_json or {}
+    if not state.get("agent_plan"):
+        raise FXPGError("请先完成一次全量分析", code="NO_PRIOR_RUN", status=400)
+    require_agent_llm()
+
+    from app.services.agent.incremental_replan import diff_uploaded_files
+
+    files = db.query(FileRecord).filter_by(project_id=project_id).all()
+    diff = diff_uploaded_files(state, files)
+    if not diff.new_file_ids:
+        raise FXPGError("未检测到新增资料，请先上传文件", code="NO_NEW_FILES", status=400)
+
+    running = (
+        db.query(AnalysisJob)
+        .filter_by(project_id=project_id)
+        .filter(AnalysisJob.status.in_(["queued", "running"]))
+        .first()
+    )
+    if running:
+        return AnalyzeResponse(
+            project_id=project_id,
+            status="running",
+            message="已有任务进行中",
+            job_id=running.id,
+        )
+
+    job = create_job(db, project_id)
+    project.status = "planning"
+    db.commit()
+    enqueue_analysis(job.id, project_id, scope="incremental")
+    return AnalyzeResponse(
+        project_id=project_id,
+        status="running",
+        message=f"增量分析已启动（新增 {len(diff.new_file_ids)} 份资料）",
+        job_id=job.id,
+    )
+
+
+@router.post("/projects/{project_id}/reanalyze", response_model=AnalyzeResponse)
+def reanalyze_project(
+    project_id: str,
+    payload: ReanalyzeRequest,
+    db: Session = Depends(get_db),
+):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if payload.scope not in ("cross_checking", "adjudicating"):
+        raise FXPGError(
+            "scope 须为 cross_checking 或 adjudicating",
+            code="INVALID_SCOPE",
+            status=400,
+        )
+    if not (project.state_json or {}).get("agent_plan"):
+        raise FXPGError("请先完成一次全量分析", code="NO_PRIOR_RUN", status=400)
+    require_agent_llm()
+
+    running = (
+        db.query(AnalysisJob)
+        .filter_by(project_id=project_id)
+        .filter(AnalysisJob.status.in_(["queued", "running"]))
+        .first()
+    )
+    if running:
+        return AnalyzeResponse(
+            project_id=project_id,
+            status="running",
+            message="已有任务进行中",
+            job_id=running.id,
+        )
+
+    job = create_job(db, project_id)
+    state = dict(project.state_json or {})
+    state["pending_scope"] = payload.scope
+    project.state_json = state
+    project.status = payload.scope
+    db.commit()
+    enqueue_analysis(job.id, project_id, scope=payload.scope)
+    return AnalyzeResponse(
+        project_id=project_id,
+        status="running",
+        message=f"局部重跑已启动（{payload.scope}）",
+        job_id=job.id,
+    )
+
+
+@router.get("/projects/{project_id}/jobs/latest", response_model=Optional[JobOut])
 def latest_job(project_id: str, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
     job = (
         db.query(AnalysisJob)
         .filter_by(project_id=project_id)
         .order_by(AnalysisJob.created_at.desc())
         .first()
     )
-    if not job:
-        raise HTTPException(404, "暂无分析任务")
     return job
 
 
@@ -210,12 +398,48 @@ def project_summary(project_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.delete("/projects/{project_id}")
-def delete_project(project_id: str, db: Session = Depends(get_db)):
+@router.get("/projects/{project_id}/agent-briefs")
+def get_agent_briefs(project_id: str, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
-    db.delete(project)
+    state = project.state_json or {}
+    from app.services.agent.mcp_hub import parse_mcp_servers
+
+    return {
+        "sub_agent_briefs": state.get("sub_agent_briefs") or {},
+        "synthesis_brief": state.get("synthesis_brief") or {},
+        "mission": state.get("mission") or {},
+        "mcp_servers": [c.name for c in parse_mcp_servers()],
+        "execution_mode": state.get("execution_mode"),
+    }
+
+
+def _delete_project_cascade(db: Session, project_id: str) -> None:
+    """删除项目及全部关联数据（含磁盘 uploads/outputs）。"""
+    db.query(ReviewRecord).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.query(Risk).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.query(ParsedDocument).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.query(ExtractedEntity).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.query(RecordLink).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.query(AgentRunLog).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.query(AnalysisJob).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.query(Output).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.query(FileRecord).filter_by(project_id=project_id).delete(synchronize_session=False)
+    for sub in ("uploads", "outputs"):
+        path = settings.storage_path / sub / project_id
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+    project = db.get(Project, project_id)
+    if project:
+        db.delete(project)
+
+
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: str, db: Session = Depends(get_db)):
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "项目不存在")
+    _delete_project_cascade(db, project_id)
     db.commit()
     return {"ok": True}
 
@@ -253,16 +477,29 @@ def review_risk(
     if not risk:
         raise HTTPException(404, "风险不存在")
     risk.status = payload.review_status
-    db.add(
-        ReviewRecord(
-            project_id=project_id,
-            risk_id=risk.id,
-            review_status=payload.review_status,
-            review_comment=payload.review_comment,
-        )
+    review = ReviewRecord(
+        project_id=project_id,
+        risk_id=risk.id,
+        review_status=payload.review_status,
+        review_comment=payload.review_comment,
     )
+    db.add(review)
     db.commit()
-    return {"ok": True}
+    db.refresh(review)
+    write_review_memory(db, risk, review)
+
+    pending = (
+        db.query(Risk)
+        .filter_by(project_id=project_id)
+        .filter(Risk.status == "pending", Risk.manual_review_required.is_(True))
+        .count()
+    )
+    project = db.get(Project, project_id)
+    if project and project.status == "needs_review" and pending == 0:
+        project.status = "completed"
+        db.commit()
+
+    return {"ok": True, "pending_reviews": pending}
 
 
 @router.post("/projects/{project_id}/regenerate-outputs")
@@ -274,6 +511,84 @@ def regenerate_outputs(project_id: str, db: Session = Depends(get_db)):
         raise FXPGError("请先完成分析", code="NO_RISKS", status=400)
     AgentWorkflow(db, project_id).regenerate_outputs_only()
     return {"ok": True, "message": "交付物已重新生成"}
+
+
+@router.post("/projects/{project_id}/deliverables/accept")
+def accept_deliverables(project_id: str, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if project.status not in ("completed", "needs_review"):
+        raise FXPGError("分析尚未完成，无法验收", code="NOT_READY", status=400)
+    state = dict(project.state_json or {})
+    state["deliverable"] = {
+        "status": "accepted",
+        "comment": "",
+        "accepted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    project.state_json = state
+    project.status = "accepted"
+    db.commit()
+    return {"ok": True, "status": project.status}
+
+
+@router.post("/projects/{project_id}/deliverables/reject")
+def reject_deliverables(
+    project_id: str,
+    payload: DeliverableReview,
+    db: Session = Depends(get_db),
+):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if project.status not in ("completed", "needs_review", "accepted"):
+        raise FXPGError("当前状态不可退回", code="NOT_READY", status=400)
+
+    state = dict(project.state_json or {})
+    comment = payload.comment or ""
+    state["deliverable"] = {
+        "status": "rejected",
+        "comment": comment,
+        "rejected_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if comment:
+        state["deliverable_feedback"] = comment
+        plan = dict(state.get("agent_plan") or {})
+        plan["deliverable_feedback"] = comment
+        state["agent_plan"] = plan
+
+    if payload.reanalyze:
+        require_agent_llm()
+        running = (
+            db.query(AnalysisJob)
+            .filter_by(project_id=project_id)
+            .filter(AnalysisJob.status.in_(["queued", "running"]))
+            .first()
+        )
+        if running:
+            return {
+                "ok": True,
+                "status": "running",
+                "message": "已有分析任务进行中",
+                "job_id": running.id,
+            }
+        state["deliverable"] = {"status": "pending", "comment": comment}
+        project.state_json = state
+        project.status = "planning"
+        db.commit()
+        job = create_job(db, project_id)
+        enqueue_analysis(job.id, project_id)
+        return {
+            "ok": True,
+            "status": "running",
+            "message": "已根据退回意见重新分析",
+            "job_id": job.id,
+        }
+
+    project.state_json = state
+    project.status = "deliverable_rejected"
+    db.commit()
+    return {"ok": True, "status": project.status, "comment": comment}
 
 
 @router.get("/projects/{project_id}/outputs")
@@ -302,9 +617,20 @@ def download_output(
     return FileResponse(path, filename=output.file_name)
 
 
-@router.get("/projects/{project_id}/logs")
+@router.get("/projects/{project_id}/logs", response_model=list)
 def list_logs(project_id: str, db: Session = Depends(get_db)):
-    return db.query(AgentRunLog).filter_by(project_id=project_id).order_by(AgentRunLog.created_at).all()
+    rows = db.query(AgentRunLog).filter_by(project_id=project_id).order_by(AgentRunLog.created_at).all()
+    return [
+        {
+            "id": r.id,
+            "step": r.step,
+            "status": r.status,
+            "detail_json": r.detail_json,
+            "duration_ms": r.duration_ms,
+            "created_at": r.created_at.isoformat() + "Z" if r.created_at else None,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/rules", response_model=list[RuleOut])

@@ -1,96 +1,139 @@
 "use client";
 
 import { WORKFLOW_STEPS, getStepStates, overallProgress } from "@/lib/workflow";
-import { STATUS_LABEL } from "@/lib/workflow";
+
+type SubAgent = { id: string; name: string; station: string; agent_say?: string };
 
 type Props = {
   status: string;
   jobStep?: string;
   jobPct?: number;
   jobStatus?: string;
-  /** 首页演示：无真实任务时播放循环进度 */
   demo?: boolean;
+  live?: boolean;
+  agentMessage?: string;
+  subAgents?: SubAgent[];
 };
 
-export function CyberWorkflow({ status, jobStep, jobPct, jobStatus, demo }: Props) {
+const AGENT_NAME = "审计助手";
+
+export function CyberWorkflow({
+  status,
+  jobStep,
+  jobPct,
+  jobStatus,
+  demo,
+  live,
+  agentMessage,
+  subAgents,
+}: Props) {
   const steps = getStepStates(status, jobStep, jobStatus);
   const pct = overallProgress(status, jobStep, jobPct, jobStatus);
-  const active = steps.find((s) => s.state === "active");
+  const activeIdx = steps.findIndex((s) => s.state === "active");
+  const active = activeIdx >= 0 ? steps[activeIdx] : undefined;
   const failed = status === "failed" || jobStatus === "failed";
+  const isLive = live || jobStatus === "running";
+  const isDone = status === "completed";
+
+  const doneSteps = steps.filter((s) => s.state === "done").slice(-4);
+  const pointerPct =
+    steps.length > 1
+      ? ((activeIdx >= 0 ? activeIdx : isDone ? steps.length - 1 : 0) + 0.5) / steps.length * 100
+      : 50;
+
+  const avatarMode = failed ? "failed" : isDone ? "done" : isLive ? "working" : active ? "idle" : "rest";
+
+  const bubbleText = failed
+    ? "抱歉，这一步遇到了问题，需要你看一下日志。"
+    : isDone
+      ? WORKFLOW_STEPS[WORKFLOW_STEPS.length - 1].agentSay
+      : agentMessage && isLive
+        ? agentMessage
+        : active?.step.agentSay ?? "我在工位等你启动任务。";
 
   return (
-    <div className={`cyber-flow${demo ? " cyber-flow--demo" : ""}`}>
-      <div className="cyber-flow__hud">
-        <div className="cyber-flow__hud-left">
-          <span className="cyber-tag">PIPELINE</span>
-          <h2 className="cyber-flow__status">
-            {failed
-              ? "SIGNAL LOST"
-              : status === "completed"
-                ? "MISSION COMPLETE"
-                : active
-                  ? active.step.label.toUpperCase()
-                  : "STANDBY"}
-          </h2>
-          <p className="cyber-flow__sub">
-            {failed ? "分析中断，请检查日志" : STATUS_LABEL[active?.step.id ?? status] ?? "等待任务启动"}
-          </p>
-        </div>
-
-        <div className="cyber-flow__hud-right">
-          <div className="cyber-ring" style={{ "--p": pct } as React.CSSProperties}>
-            <svg viewBox="0 0 120 120">
-              <circle className="cyber-ring__track" cx="60" cy="60" r="52" />
-              <circle
-                className="cyber-ring__fill"
-                cx="60"
-                cy="60"
-                r="52"
-                style={{
-                  strokeDasharray: 326.7,
-                  strokeDashoffset: 326.7 * (1 - pct / 100),
-                }}
-              />
-            </svg>
-            <div className="cyber-ring__text">
-              <span className="cyber-ring__num">{pct}</span>
-              <span className="cyber-ring__unit">%</span>
-            </div>
+    <section
+      className={`agent-work${isLive ? " agent-work--live" : ""}${failed ? " agent-work--failed" : ""}${isDone ? " agent-work--done" : ""}`}
+      aria-label="Agent 工作流程"
+    >
+      <div className="agent-work__hero">
+        <div className={`agent-avatar agent-avatar--${avatarMode}`} aria-hidden>
+          <div className="agent-avatar__head">
+            <span className="agent-avatar__eye" />
+            <span className="agent-avatar__eye" />
           </div>
-        </div>
-      </div>
-
-      <div className="cyber-flow__track-wrap">
-        <div className="cyber-flow__track-bg" />
-        <div className="cyber-flow__track-fill" style={{ width: `${pct}%` }} />
-        <div className="cyber-flow__nodes">
-          {steps.map(({ step, state }, i) => (
-            <div
-              key={step.id}
-              className={`cyber-node cyber-node--${state}`}
-              style={{ "--i": i } as React.CSSProperties}
-            >
-              <div className="cyber-node__hex">
-                <span className="cyber-node__idx">{String(i + 1).padStart(2, "0")}</span>
-              </div>
-              <span className="cyber-node__label">{step.short}</span>
-              {state === "active" && <span className="cyber-node__scan" aria-hidden />}
+          <div className="agent-avatar__body" />
+          {isLive && (
+            <div className="agent-avatar__hands">
+              <span className="agent-avatar__hand agent-avatar__hand--l" />
+              <span className="agent-avatar__hand agent-avatar__hand--r" />
             </div>
-          ))}
+          )}
+        </div>
+
+        <div className="agent-work__speech">
+          <div className="agent-work__speech-head">
+            <strong>{AGENT_NAME}</strong>
+            <span className="agent-work__pct">{pct}%</span>
+          </div>
+          <p className="agent-work__line">
+            {bubbleText}
+            {isLive && (
+              <span className="agent-work__typing" aria-hidden>
+                <span /><span /><span />
+              </span>
+            )}
+          </p>
+          {active && (
+            <p className="agent-work__station">
+              当前工位 · <em>{active.step.station}</em>
+              {isLive && jobPct != null && ` · 本步 ${jobPct}%`}
+            </p>
+          )}
+          {subAgents && subAgents.length > 0 && (
+            <ul className="agent-work__team" aria-label="协同子 Agent">
+              {subAgents.map((sa) => (
+                <li key={sa.id} className="agent-work__team-chip" title={sa.station}>
+                  {sa.name}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
 
-      <div className="cyber-flow__meta">
-        <span>
-          STEP{" "}
-          {(steps.findIndex((s) => s.state === "active") >= 0
-            ? steps.findIndex((s) => s.state === "active")
-            : steps.filter((s) => s.state === "done").length - 1) + 1}{" "}
-          / {WORKFLOW_STEPS.length}
-        </span>
-        <span className="cyber-flow__pulse-dot" />
-        <span>{jobStatus === "running" ? "LIVE" : status === "completed" ? "DONE" : "IDLE"}</span>
+      <div className="agent-work__floor">
+        <div
+          className="agent-work__marker"
+          style={{ left: `${pointerPct}%` }}
+          aria-hidden
+        >
+          <span className="agent-work__marker-icon">▲</span>
+        </div>
+        <ol className="agent-work__stations">
+          {steps.map(({ step, state }) => (
+            <li
+              key={step.id}
+              className={`agent-work__station agent-work__station--${state}`}
+              title={step.desc}
+            >
+              <span className="agent-work__station-desk">{step.station}</span>
+              <span className="agent-work__station-name">{step.short}</span>
+            </li>
+          ))}
+        </ol>
       </div>
-    </div>
+
+      {doneSteps.length > 0 && (
+        <ul className="agent-work__journal">
+          {doneSteps.map(({ step }) => (
+            <li key={step.id}>
+              <span className="agent-work__journal-check">✓</span>
+              {step.agentDone}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

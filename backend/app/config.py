@@ -30,10 +30,28 @@ class Settings(BaseSettings):
     openai_base_url: str = Field(default="", validation_alias="OPENAI_BASE_URL")
 
     enable_llm: bool = True
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ]
     api_key: str = ""
     max_upload_mb: int = 50
     job_workers: int = 2
+    human_gate_manual_threshold: int = 5
+    human_gate_manual_ratio: float = 0.45
+    human_gate_high_threshold: int = 3
+    human_gate_critic_threshold: int = 2
+    enable_human_gate: bool = Field(default=False, validation_alias="ENABLE_HUMAN_GATE")
+    enable_critic_llm: bool = True
+    enable_critic_readjudicate: bool = Field(default=True, validation_alias="ENABLE_CRITIC_READJUDICATE")
+    critic_readjudicate_max_rounds: int = Field(default=2, validation_alias="CRITIC_READJUDICATE_MAX_ROUNDS")
+    agent_execution_mode: str = Field(default="orchestrator", validation_alias="AGENT_EXECUTION_MODE")
+    enable_sub_agent_llm: bool = Field(default=True, validation_alias="ENABLE_SUB_AGENT_LLM")
+    sub_agent_max_tool_turns: int = Field(default=4, validation_alias="SUB_AGENT_MAX_TOOL_TURNS")
+    mcp_servers: str = Field(default="[]", validation_alias="MCP_SERVERS")
+    react_max_turns: int = Field(default=16, validation_alias="REACT_MAX_TURNS")
     allowed_extensions: set[str] = {
         ".xlsx", ".xls", ".csv", ".docx", ".doc", ".pdf", ".jpg", ".jpeg", ".png",
     }

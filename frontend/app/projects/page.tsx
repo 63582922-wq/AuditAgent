@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { PageTop } from "@/components/PageChrome";
 import { Project, api } from "@/lib/api";
 import { STATUS_LABEL, overallProgress } from "@/lib/workflow";
+import { formatDate } from "@/lib/format";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -23,9 +24,13 @@ export default function ProjectsPage() {
   }, []);
 
   async function remove(id: string, name: string) {
-    if (!confirm(`确定删除「${name}」？`)) return;
-    await api(`/projects/${id}`, { method: "DELETE" });
-    load();
+    if (!confirm(`确定删除「${name}」？关联资料、风险与日志将一并清除。`)) return;
+    try {
+      await api(`/projects/${id}`, { method: "DELETE" });
+      load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "删除失败");
+    }
   }
 
   return (
@@ -82,7 +87,7 @@ export default function ProjectsPage() {
                     </div>
                   </td>
                   <td>{STATUS_LABEL[p.status] || p.status}</td>
-                  <td className="mono">{new Date(p.created_at).toLocaleDateString("zh-CN")}</td>
+                  <td className="mono">{formatDate(p.created_at)}</td>
                   <td style={{ textAlign: "right" }}>
                     <button type="button" className="link-btn" onClick={() => remove(p.id, p.name)}>
                       删除

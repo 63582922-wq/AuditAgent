@@ -20,8 +20,8 @@ export function Header() {
   return (
     <header className="header">
       <Link href="/" className="logo">
-        <span className="logo-mark">FX</span>
-        <span>会计风险评估</span>
+        <span className="logo-mark">AA</span>
+        <span>AuditAgent</span>
       </Link>
       <nav>
         {NAV.map((item) => (

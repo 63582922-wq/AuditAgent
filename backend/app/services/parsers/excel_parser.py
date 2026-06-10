@@ -147,7 +147,7 @@ def annotate_excel(source: Path, risks: list[dict], output: Path) -> None:
         for cell in ws[row_num]:
             cell.fill = fill
             if loc.get("column") and cell.column_letter == _col_letter(loc["column"], ws, row_num):
-                cell.comment = openpyxl.comments.Comment(risk.get("suggestion", ""), "FXPG Agent")
+                cell.comment = openpyxl.comments.Comment(risk.get("suggestion", ""), "AuditAgent")
         note_col = ws.max_column + 1
         if ws.cell(row=1, column=note_col).value != "风险说明":
             ws.cell(row=1, column=note_col, value="风险说明")

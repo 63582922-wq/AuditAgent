@@ -63,6 +63,11 @@ class ReviewCreate(BaseModel):
     review_comment: Optional[str] = None
 
 
+class DeliverableReview(BaseModel):
+    comment: Optional[str] = None
+    reanalyze: bool = False
+
+
 class OutputOut(BaseModel):
     id: str
     project_id: str
@@ -109,11 +114,46 @@ class ProjectDetail(ProjectOut):
     outputs: List[OutputOut] = Field(default_factory=list)
 
 
+class ProjectLiveOut(ProjectOut):
+    """轻量快照：HUD / 侧栏轮询用，不含 risks/outputs 等大列表。"""
+    state_json: Optional[Dict[str, Any]] = None
+    file_count: int = 0
+    risk_count: int = 0
+    output_count: int = 0
+
+
+class FileBriefOut(BaseModel):
+    id: str
+    file_name: str
+    document_category: str
+    parse_status: str
+
+    model_config = {"from_attributes": True}
+
+
+class RiskPreviewOut(BaseModel):
+    id: str
+    risk_level: str
+    problem: str
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectOverviewOut(ProjectLiveOut):
+    """概览页首屏：不含完整 risk 明细与 evidence。"""
+    files: List[FileBriefOut] = Field(default_factory=list)
+    risk_preview: List[RiskPreviewOut] = Field(default_factory=list)
+
+
 class AnalyzeResponse(BaseModel):
     project_id: str
     status: str
     message: str
     job_id: Optional[str] = None
+
+
+class ReanalyzeRequest(BaseModel):
+    scope: str = Field(default="adjudicating", description="cross_checking | adjudicating")
 
 
 class JobOut(BaseModel):

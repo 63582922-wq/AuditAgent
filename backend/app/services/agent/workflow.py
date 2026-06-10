@@ -23,7 +23,11 @@ from app.models import (
 )
 from app.services.agent.llm_client import require_agent_llm
 from app.services.agent.adjudicator import adjudicate_risks
+from app.services.agent.agent_trace import AgentTrace
+from app.services.agent.execution_graph import ExecutionGraph
+from app.services.agent.incremental_replan import build_incremental_plan, diff_uploaded_files
 from app.services.agent.planner import plan_analysis
+from app.services.agent.sub_agents import enrich_plan_with_sub_agents
 from app.services.anomaly_detector import detect_amount_anomalies
 from app.services.classifier import classify_document
 from app.services.cross_checker import check_missing_documents, cross_check_amounts, detect_duplicate_invoices
@@ -38,6 +42,15 @@ from app.services.outputs.pdf_report import generate_pdf_report
 from app.services.record_linker import build_record_links, links_to_cross_risks
 from app.services.risk_scorer import calculate_risk_score
 from app.services.rule_engine import run_rules_on_fields, run_rules_on_rows
+
+CROSS_RISK_PREFIXES = ("AMT-", "INV-", "CROSS-", "3WAY-", "LINK-", "ANOM-")
+
+
+def _is_cross_derived_risk(rule_triggered: str | None) -> bool:
+    if not rule_triggered:
+        return False
+    return any(rule_triggered.startswith(p) for p in CROSS_RISK_PREFIXES)
+
 
 STEP_PROGRESS = {
     "planning": 5,
@@ -94,190 +107,240 @@ class AgentWorkflow:
         if not project:
             raise ValueError("project not found")
 
+        trace = AgentTrace(self.db, self.project_id)
+
         try:
             require_agent_llm()
-            self._set_status(project, "classifying")
-            self._log("classify", "running")
             files = self.db.query(FileRecord).filter_by(project_id=self.project_id).all()
 
-            self._set_status(project, "planning")
-            self._log("planning", "running")
-            agent_plan = plan_analysis(self.db, self.project_id, files)
-            self._log("planning", "completed", agent_plan)
+            with trace.timed_step("planning"):
+                agent_plan = plan_analysis(self.db, self.project_id, files)
+            graph = ExecutionGraph.from_plan(agent_plan, files)
+            trace.plan(agent_plan, graph.to_dict())
 
             parsed_docs: list[dict] = []
 
-            for f in files:
-                ext = Path(f.file_name).suffix.lower()
-                classification = classify_document(f.file_name, ext)
-                f.file_type = classification["file_type"]
-                f.document_category = classification["document_category"]
-                f.confidence = classification["confidence"]
-                f.meta_json = classification
-                self.db.commit()
+            if graph.should_run("classifying"):
+                self._set_status(project, "classifying")
+                trace.step("classifying", "running")
+                for f in files:
+                    ext = Path(f.file_name).suffix.lower()
+                    classification = classify_document(f.file_name, ext)
+                    f.file_type = classification["file_type"]
+                    f.document_category = classification["document_category"]
+                    f.confidence = classification["confidence"]
+                    f.meta_json = classification
+                    self.db.commit()
+                trace.step("classifying", "completed", {"file_count": len(files)})
+            else:
+                trace.step("classifying", "skipped", {"reason": "plan_steps"})
 
-            self._set_status(project, "parsing")
-            for f in files:
-                content = self._parse_file(f)
-                headers = []
-                if content.get("sheets"):
-                    headers = [c["name"] for c in content["sheets"][0].get("columns", [])]
-                reclassify = classify_document(
-                    f.file_name, Path(f.file_name).suffix, headers=headers, text=content.get("text_content", "")
-                )
-                if reclassify["confidence"] > (f.confidence or 0):
-                    f.document_category = reclassify["document_category"]
-                    f.confidence = reclassify["confidence"]
-                    f.meta_json = reclassify
-                pd = ParsedDocument(
-                    project_id=self.project_id,
-                    file_id=f.id,
-                    document_type=f.document_category,
-                    content_json=content,
-                    text_content=content.get("text_content", ""),
-                )
-                self.db.merge(pd)
-                f.parse_status = "done"
-                self.db.commit()
-                parsed_docs.append(
-                    {
-                        "file_id": f.id,
-                        "file_name": f.file_name,
-                        "document_category": f.document_category,
-                        "content_json": content,
-                    }
-                )
+            graph = ExecutionGraph.from_plan(agent_plan, files)
 
-            self._set_status(project, "extracting")
-            self._progress("extracting")
-            self.db.query(ExtractedEntity).filter_by(project_id=self.project_id).delete()
-            self.db.query(RecordLink).filter_by(project_id=self.project_id).delete()
-            entities = extract_entities_from_documents(self.project_id, parsed_docs)
-            for ent in entities:
-                self.db.add(
-                    ExtractedEntity(
-                        project_id=ent["project_id"],
-                        file_id=ent["file_id"],
-                        entity_type=ent["entity_type"],
-                        entity_value=ent["entity_value"],
-                        standard_value=ent.get("standard_value"),
-                        source_location=ent.get("source_location"),
-                        confidence=ent.get("confidence"),
+            if graph.should_run("parsing"):
+                self._set_status(project, "parsing")
+                trace.step("parsing", "running")
+                for f in files:
+                    content = self._parse_file(f)
+                    headers = []
+                    if content.get("sheets"):
+                        headers = [c["name"] for c in content["sheets"][0].get("columns", [])]
+                    reclassify = classify_document(
+                        f.file_name, Path(f.file_name).suffix, headers=headers, text=content.get("text_content", "")
                     )
-                )
-            links = build_record_links(self.project_id, entities)
-            for link in links:
-                self.db.add(RecordLink(**link))
-            self.db.commit()
+                    if reclassify["confidence"] > (f.confidence or 0):
+                        f.document_category = reclassify["document_category"]
+                        f.confidence = reclassify["confidence"]
+                        f.meta_json = reclassify
+                    pd = ParsedDocument(
+                        project_id=self.project_id,
+                        file_id=f.id,
+                        document_type=f.document_category,
+                        content_json=content,
+                        text_content=content.get("text_content", ""),
+                    )
+                    self.db.merge(pd)
+                    f.parse_status = "done"
+                    self.db.commit()
+                    parsed_docs.append(
+                        {
+                            "file_id": f.id,
+                            "file_name": f.file_name,
+                            "document_category": f.document_category,
+                            "content_json": content,
+                        }
+                    )
+                trace.step("parsing", "completed", {"parsed": len(parsed_docs)})
+            else:
+                trace.step("parsing", "skipped", {"reason": "plan_steps"})
 
-            self._set_status(project, "running_rules")
-            self._progress("running_rules")
-            rules = self._load_rules()
+            graph = ExecutionGraph.from_plan(agent_plan, files)
+
+            links: list[dict] = []
+            entities: list[dict] = []
+
+            if graph.should_run("extracting") and parsed_docs:
+                self._set_status(project, "extracting")
+                self._progress("extracting")
+                trace.step("extracting", "running")
+                self.db.query(ExtractedEntity).filter_by(project_id=self.project_id).delete()
+                self.db.query(RecordLink).filter_by(project_id=self.project_id).delete()
+                entities = extract_entities_from_documents(self.project_id, parsed_docs)
+                for ent in entities:
+                    self.db.add(
+                        ExtractedEntity(
+                            project_id=ent["project_id"],
+                            file_id=ent["file_id"],
+                            entity_type=ent["entity_type"],
+                            entity_value=ent["entity_value"],
+                            standard_value=ent.get("standard_value"),
+                            source_location=ent.get("source_location"),
+                            confidence=ent.get("confidence"),
+                        )
+                    )
+                links = build_record_links(self.project_id, entities)
+                for link in links:
+                    self.db.add(RecordLink(**link))
+                self.db.commit()
+                trace.step(
+                    "extracting",
+                    "completed",
+                    {"entities": len(entities), "links": len(links)},
+                )
+            else:
+                trace.step("extracting", "skipped", {"reason": "plan_steps or no parsed docs"})
+
             all_risks: list[dict] = []
             invoice_rows: list[dict] = []
             expense_rows: list[dict] = []
 
-            for doc in parsed_docs:
-                if doc["document_category"] in RULE_CATEGORIES:
-                    for sheet in doc["content_json"].get("sheets", []):
-                        columns_map = {
-                            c["name"]: c.get("standard_field")
-                            for c in sheet.get("columns", [])
-                            if c.get("standard_field")
-                        }
-                        rows = [
-                            {
-                                "row_number": r["row_number"],
-                                "values": r["values"],
-                                "columns_map": columns_map,
-                                "sheet_name": sheet["sheet_name"],
+            if graph.should_run("running_rules") and parsed_docs:
+                self._set_status(project, "running_rules")
+                self._progress("running_rules")
+                trace.step("running_rules", "running", {"focus": sorted(graph.rule_focus_categories)})
+                rules = graph.sort_rules(self._load_rules())
+                for doc in parsed_docs:
+                    if doc["document_category"] in RULE_CATEGORIES:
+                        for sheet in doc["content_json"].get("sheets", []):
+                            columns_map = {
+                                c["name"]: c.get("standard_field")
+                                for c in sheet.get("columns", [])
+                                if c.get("standard_field")
                             }
-                            for r in sheet.get("rows", [])
-                        ]
-                        hits = run_rules_on_rows(
-                            rows,
-                            rules,
-                            {
-                                "file_id": doc["file_id"],
-                                "document_category": doc["document_category"],
-                            },
-                        )
-                        for hit in hits:
-                            risk = self._hit_to_risk(hit, doc)
-                            all_risks.append(risk)
-                        if doc["document_category"] == "expense_detail":
-                            expense_rows.extend(rows)
-                        if doc["document_category"] in ("expense_detail", "invoice_list"):
-                            for r in rows:
-                                vals = r["values"]
-                                inv = vals.get("invoice_number") or vals.get("发票号") or vals.get("发票号码")
-                                if inv:
-                                    invoice_rows.append(
-                                        {
-                                            "invoice_number": str(inv),
-                                            "row": r["row_number"],
-                                            "file_name": doc["file_name"],
-                                        }
-                                    )
-
-                if doc["document_category"] in FIELD_RULE_CATEGORIES:
-                    fields = doc["content_json"].get("fields") or {}
-                    if fields:
-                        hits = run_rules_on_fields(
-                            fields,
-                            rules,
-                            {"file_id": doc["file_id"], "document_category": doc["document_category"]},
-                        )
-                        for hit in hits:
-                            all_risks.append(self._hit_to_risk(hit, doc))
-
-                if doc["document_category"] == "expense_detail":
-                    all_risks.extend(
-                        detect_cross_period_risks(
-                            [
+                            rows = [
                                 {
-                                    **r,
+                                    "row_number": r["row_number"],
+                                    "values": r["values"],
+                                    "columns_map": columns_map,
                                     "sheet_name": sheet["sheet_name"],
                                 }
-                                for sheet in doc["content_json"].get("sheets", [])
-                                for r in [
-                                    {
-                                        "row_number": row["row_number"],
-                                        "values": row["values"],
-                                    }
-                                    for row in sheet.get("rows", [])
-                                ]
-                            ],
-                            doc["file_id"],
-                            doc["file_name"],
-                        )
-                    )
+                                for r in sheet.get("rows", [])
+                            ]
+                            hits = run_rules_on_rows(
+                                rows,
+                                rules,
+                                {
+                                    "file_id": doc["file_id"],
+                                    "document_category": doc["document_category"],
+                                },
+                            )
+                            for hit in hits:
+                                risk = self._hit_to_risk(hit, doc)
+                                all_risks.append(risk)
+                            if doc["document_category"] == "expense_detail":
+                                expense_rows.extend(rows)
+                            if doc["document_category"] in ("expense_detail", "invoice_list"):
+                                for r in rows:
+                                    vals = r["values"]
+                                    inv = vals.get("invoice_number") or vals.get("发票号") or vals.get("发票号码")
+                                    if inv:
+                                        invoice_rows.append(
+                                            {
+                                                "invoice_number": str(inv),
+                                                "row": r["row_number"],
+                                                "file_name": doc["file_name"],
+                                            }
+                                        )
 
-            self._set_status(project, "cross_checking")
-            self._progress("cross_checking")
-            all_risks.extend(cross_check_amounts(parsed_docs))
-            all_risks.extend(detect_duplicate_invoices(invoice_rows))
-            all_risks.extend(links_to_cross_risks(links, parsed_docs))
-            all_risks.extend(detect_three_way_gaps(parsed_docs, links))
-            all_risks.extend(detect_amount_anomalies(expense_rows))
+                    if doc["document_category"] in FIELD_RULE_CATEGORIES:
+                        fields = doc["content_json"].get("fields") or {}
+                        if fields:
+                            hits = run_rules_on_fields(
+                                fields,
+                                rules,
+                                {"file_id": doc["file_id"], "document_category": doc["document_category"]},
+                            )
+                            for hit in hits:
+                                all_risks.append(self._hit_to_risk(hit, doc))
+
+                    if doc["document_category"] == "expense_detail" and graph.should_run_cross("cross_period"):
+                        all_risks.extend(
+                            detect_cross_period_risks(
+                                [
+                                    {
+                                        **r,
+                                        "sheet_name": sheet["sheet_name"],
+                                    }
+                                    for sheet in doc["content_json"].get("sheets", [])
+                                    for r in [
+                                        {
+                                            "row_number": row["row_number"],
+                                            "values": row["values"],
+                                        }
+                                        for row in sheet.get("rows", [])
+                                    ]
+                                ],
+                                doc["file_id"],
+                                doc["file_name"],
+                            )
+                        )
+
+                trace.step("running_rules", "completed", {"rule_hits": len(all_risks)})
+            else:
+                trace.step("running_rules", "skipped", {"reason": "plan_steps or no parsed docs"})
+
+            if graph.should_run("cross_checking") and parsed_docs:
+                self._set_status(project, "cross_checking")
+                self._progress("cross_checking")
+                trace.step("cross_checking", "running", {"modules": sorted(graph.cross_modules)})
+                if graph.should_run_cross("amounts"):
+                    all_risks.extend(cross_check_amounts(parsed_docs))
+                if graph.should_run_cross("duplicates"):
+                    all_risks.extend(detect_duplicate_invoices(invoice_rows))
+                if graph.should_run_cross("record_links"):
+                    all_risks.extend(links_to_cross_risks(links, parsed_docs))
+                if graph.should_run_cross("three_way"):
+                    all_risks.extend(detect_three_way_gaps(parsed_docs, links))
+                if graph.should_run_cross("anomalies"):
+                    all_risks.extend(detect_amount_anomalies(expense_rows))
+                trace.step("cross_checking", "completed", {"total_risks": len(all_risks)})
+            else:
+                trace.step("cross_checking", "skipped", {"reason": "plan_steps or no parsed docs"})
 
             present = {d["document_category"] for d in parsed_docs}
             missing = check_missing_documents(present)
 
-            self._set_status(project, "adjudicating")
-            self._progress("adjudicating")
-            self._log("adjudicating", "running", {"risk_count": len(all_risks)})
-            all_risks = adjudicate_risks(self.db, all_risks, agent_plan)
-            for r in all_risks:
-                if r.get("risk_level"):
-                    scores = calculate_risk_score(
-                        r["risk_level"],
-                        r.get("evidence_json") or {},
-                        r.get("confidence", 0.9),
-                    )
-                    r["risk_score"] = scores["total_score"]
-                    r["risk_level"] = scores["risk_level"]
-            self._log("adjudicating", "completed", {"agent_mode": agent_plan.get("agent_mode")})
+            if graph.should_run("adjudicating"):
+                self._set_status(project, "adjudicating")
+                self._progress("adjudicating")
+                trace.step("adjudicating", "running", {"risk_count": len(all_risks)})
+                all_risks = adjudicate_risks(self.db, all_risks, agent_plan)
+                for r in all_risks:
+                    if r.get("risk_level"):
+                        scores = calculate_risk_score(
+                            r["risk_level"],
+                            r.get("evidence_json") or {},
+                            r.get("confidence", 0.9),
+                        )
+                        r["risk_score"] = scores["total_score"]
+                        r["risk_level"] = scores["risk_level"]
+                trace.step(
+                    "adjudicating",
+                    "completed",
+                    {"agent_mode": agent_plan.get("agent_mode"), "risk_count": len(all_risks)},
+                )
+            else:
+                trace.step("adjudicating", "skipped", {"reason": "plan_steps"})
 
             self.db.query(Risk).filter_by(project_id=self.project_id).delete()
             for r in all_risks:
@@ -304,24 +367,356 @@ class AgentWorkflow:
                 self.db.add(risk_obj)
             self.db.commit()
 
-            self._set_status(project, "generating_report")
-            self._progress("generating_report")
-            self._generate_outputs(project, missing)
+            if graph.should_run("generating_report"):
+                self._set_status(project, "generating_report")
+                self._progress("generating_report")
+                self._generate_outputs(project, missing)
             project.summary = self._build_summary(all_risks, missing)
             project.state_json = {
                 "agent_plan": agent_plan,
+                "execution_graph": graph.to_dict(),
                 "missing_documents": missing,
                 "risk_count": len(all_risks),
                 "present_categories": list(present),
                 "entity_count": len(entities),
                 "link_count": len(links),
+                "processed_file_ids": [f.id for f in files],
+                "execution_mode": "pipeline",
             }
             self._set_status(project, "completed")
             self._progress("completed")
-            self._log("workflow", "completed", {"risk_count": len(all_risks)})
+            trace.step("workflow", "completed", {"risk_count": len(all_risks)})
         except Exception as exc:
             self._set_status(project, "failed")
-            self._log("workflow", "failed", {"error": str(exc)})
+            trace.step("workflow", "failed", {"error": str(exc)})
+            raise
+
+    def run_react(self) -> None:
+        """ReAct 外环：LLM 逐步调度内环流水线工具。"""
+        from app.services.agent.pipeline_executor import PipelineExecutor
+
+        trace = AgentTrace(self.db, self.project_id)
+        try:
+            require_agent_llm()
+            executor = PipelineExecutor(self.db, self.project_id, self.progress_callback, trace)
+            executor.run_react()
+        except Exception as exc:
+            project = self.db.get(Project, self.project_id)
+            if project:
+                self._set_status(project, "failed")
+            trace.step("workflow", "failed", {"error": str(exc), "mode": "react"})
+            raise
+
+    def run_orchestrator(self) -> None:
+        """Orchestrator 外环：主 Agent 拆解任务并委派子 Agent。"""
+        from app.services.agent.orchestrator import MissionOrchestrator
+
+        trace = AgentTrace(self.db, self.project_id)
+        try:
+            MissionOrchestrator(self.db, self.project_id, self.progress_callback, trace).run()
+        except Exception as exc:
+            project = self.db.get(Project, self.project_id)
+            if project:
+                self._set_status(project, "failed")
+            trace.step("workflow", "failed", {"error": str(exc), "mode": "orchestrator"})
+            raise
+
+    def run_partial(self, scope: str) -> None:
+        """局部重跑：cross_checking（交叉比对+研判+报告）或 adjudicating（仅研判+报告）。"""
+        if scope not in ("cross_checking", "adjudicating"):
+            raise ValueError(f"unsupported partial scope: {scope}")
+
+        project = self.db.get(Project, self.project_id)
+        if not project:
+            raise ValueError("project not found")
+
+        state = project.state_json or {}
+        agent_plan = state.get("agent_plan") or {}
+        if not agent_plan:
+            raise ValueError("缺少 agent_plan，请先完成全量分析")
+
+        trace = AgentTrace(self.db, self.project_id)
+        trace.step("runtime", "running", {"scope": scope, "kind": "partial_rerun"})
+
+        try:
+            require_agent_llm()
+            files = self.db.query(FileRecord).filter_by(project_id=self.project_id).all()
+            graph = ExecutionGraph.from_plan(agent_plan, files)
+            parsed_docs = self._load_parsed_docs_from_db()
+            links = self._load_links_from_db()
+            missing = state.get("missing_documents") or []
+
+            if scope == "adjudicating":
+                all_risks = self._risks_from_db()
+                if not all_risks:
+                    raise ValueError("无风险可研判")
+            else:
+                base_risks = [
+                    self._risk_orm_to_dict(r)
+                    for r in self.db.query(Risk).filter_by(project_id=self.project_id).all()
+                    if not _is_cross_derived_risk(r.rule_triggered)
+                ]
+                invoice_rows, expense_rows = self._collect_invoice_expense_rows(parsed_docs)
+                cross_risks: list[dict] = []
+                self._set_status(project, "cross_checking")
+                self._progress("cross_checking")
+                if graph.should_run_cross("amounts"):
+                    cross_risks.extend(cross_check_amounts(parsed_docs))
+                if graph.should_run_cross("duplicates"):
+                    cross_risks.extend(detect_duplicate_invoices(invoice_rows))
+                if graph.should_run_cross("record_links"):
+                    cross_risks.extend(links_to_cross_risks(links, parsed_docs))
+                if graph.should_run_cross("three_way"):
+                    cross_risks.extend(detect_three_way_gaps(parsed_docs, links))
+                if graph.should_run_cross("anomalies"):
+                    cross_risks.extend(detect_amount_anomalies(expense_rows))
+                all_risks = base_risks + cross_risks
+
+            self._set_status(project, "adjudicating")
+            self._progress("adjudicating")
+            all_risks = adjudicate_risks(self.db, all_risks, agent_plan)
+            for r in all_risks:
+                if r.get("risk_level"):
+                    scores = calculate_risk_score(
+                        r["risk_level"],
+                        r.get("evidence_json") or {},
+                        r.get("confidence", 0.9),
+                    )
+                    r["risk_score"] = scores["total_score"]
+                    r["risk_level"] = scores["risk_level"]
+
+            self._persist_risks(all_risks)
+            self._set_status(project, "generating_report")
+            self._progress("generating_report")
+            self._generate_outputs(project, missing)
+            project.summary = self._build_summary(all_risks, missing)
+            state["partial_rerun"] = {"scope": scope, "risk_count": len(all_risks)}
+            project.state_json = state
+            self._set_status(project, "completed")
+            self._progress("completed")
+            trace.step("runtime", "completed", {"scope": scope, "risk_count": len(all_risks)})
+        except Exception as exc:
+            self._set_status(project, "failed")
+            trace.step("runtime", "failed", {"scope": scope, "error": str(exc)})
+            raise
+
+    def run_incremental(self) -> None:
+        """补资料后增量分析：仅解析新文件，重跑受影响阶段。"""
+        project = self.db.get(Project, self.project_id)
+        if not project:
+            raise ValueError("project not found")
+
+        state = dict(project.state_json or {})
+        base_plan = state.get("agent_plan") or {}
+        if not base_plan:
+            raise ValueError("缺少历史 agent_plan，请先完成全量分析")
+
+        files = self.db.query(FileRecord).filter_by(project_id=self.project_id).all()
+        diff = diff_uploaded_files(state, files)
+        if not diff.new_file_ids:
+            raise ValueError("没有检测到新增资料")
+
+        agent_plan = enrich_plan_with_sub_agents(
+            build_incremental_plan(base_plan, diff),
+            files,
+        )
+        graph = ExecutionGraph.from_plan(agent_plan, files)
+        trace = AgentTrace(self.db, self.project_id)
+        trace.plan(agent_plan, graph.to_dict())
+        trace.step("runtime", "running", {"scope": "incremental", "new_files": len(diff.new_file_ids)})
+
+        try:
+            require_agent_llm()
+            new_files = [f for f in files if f.id in diff.new_file_ids]
+
+            if graph.should_run("classifying"):
+                self._set_status(project, "classifying")
+                for f in new_files:
+                    ext = Path(f.file_name).suffix.lower()
+                    classification = classify_document(f.file_name, ext)
+                    f.file_type = classification["file_type"]
+                    f.document_category = classification["document_category"]
+                    f.confidence = classification["confidence"]
+                    f.meta_json = classification
+                    self.db.commit()
+
+            parsed_docs = self._load_parsed_docs_from_db()
+
+            if graph.should_run("parsing"):
+                self._set_status(project, "parsing")
+                for f in new_files:
+                    content = self._parse_file(f)
+                    headers = []
+                    if content.get("sheets"):
+                        headers = [c["name"] for c in content["sheets"][0].get("columns", [])]
+                    reclassify = classify_document(
+                        f.file_name, Path(f.file_name).suffix, headers=headers, text=content.get("text_content", "")
+                    )
+                    if reclassify["confidence"] > (f.confidence or 0):
+                        f.document_category = reclassify["document_category"]
+                        f.confidence = reclassify["confidence"]
+                        f.meta_json = reclassify
+                    pd = ParsedDocument(
+                        project_id=self.project_id,
+                        file_id=f.id,
+                        document_type=f.document_category,
+                        content_json=content,
+                        text_content=content.get("text_content", ""),
+                    )
+                    self.db.merge(pd)
+                    f.parse_status = "done"
+                    self.db.commit()
+                parsed_docs = self._load_parsed_docs_from_db()
+
+            graph = ExecutionGraph.from_plan(agent_plan, files)
+            links: list[dict] = []
+            entities: list[dict] = []
+            all_risks: list[dict] = []
+            invoice_rows: list[dict] = []
+            expense_rows: list[dict] = []
+
+            if graph.should_run("extracting") and parsed_docs:
+                self._set_status(project, "extracting")
+                self._progress("extracting")
+                self.db.query(ExtractedEntity).filter_by(project_id=self.project_id).delete()
+                self.db.query(RecordLink).filter_by(project_id=self.project_id).delete()
+                entities = extract_entities_from_documents(self.project_id, parsed_docs)
+                for ent in entities:
+                    self.db.add(
+                        ExtractedEntity(
+                            project_id=ent["project_id"],
+                            file_id=ent["file_id"],
+                            entity_type=ent["entity_type"],
+                            entity_value=ent["entity_value"],
+                            standard_value=ent.get("standard_value"),
+                            source_location=ent.get("source_location"),
+                            confidence=ent.get("confidence"),
+                        )
+                    )
+                links = build_record_links(self.project_id, entities)
+                for link in links:
+                    self.db.add(RecordLink(**link))
+                self.db.commit()
+
+            if graph.should_run("running_rules") and parsed_docs:
+                self._set_status(project, "running_rules")
+                self._progress("running_rules")
+                rules = graph.sort_rules(self._load_rules())
+                for doc in parsed_docs:
+                    if doc["document_category"] in RULE_CATEGORIES:
+                        for sheet in doc["content_json"].get("sheets", []):
+                            columns_map = {
+                                c["name"]: c.get("standard_field")
+                                for c in sheet.get("columns", [])
+                                if c.get("standard_field")
+                            }
+                            rows = [
+                                {
+                                    "row_number": r["row_number"],
+                                    "values": r["values"],
+                                    "columns_map": columns_map,
+                                    "sheet_name": sheet["sheet_name"],
+                                }
+                                for r in sheet.get("rows", [])
+                            ]
+                            hits = run_rules_on_rows(
+                                rows,
+                                rules,
+                                {"file_id": doc["file_id"], "document_category": doc["document_category"]},
+                            )
+                            for hit in hits:
+                                all_risks.append(self._hit_to_risk(hit, doc))
+                            if doc["document_category"] == "expense_detail":
+                                expense_rows.extend(rows)
+                            if doc["document_category"] in ("expense_detail", "invoice_list"):
+                                for r in rows:
+                                    vals = r["values"]
+                                    inv = vals.get("invoice_number") or vals.get("发票号") or vals.get("发票号码")
+                                    if inv:
+                                        invoice_rows.append(
+                                            {
+                                                "invoice_number": str(inv),
+                                                "row": r["row_number"],
+                                                "file_name": doc["file_name"],
+                                            }
+                                        )
+                    if doc["document_category"] in FIELD_RULE_CATEGORIES:
+                        fields = doc["content_json"].get("fields") or {}
+                        if fields:
+                            hits = run_rules_on_fields(
+                                fields,
+                                rules,
+                                {"file_id": doc["file_id"], "document_category": doc["document_category"]},
+                            )
+                            for hit in hits:
+                                all_risks.append(self._hit_to_risk(hit, doc))
+
+            if graph.should_run("cross_checking") and parsed_docs:
+                self._set_status(project, "cross_checking")
+                self._progress("cross_checking")
+                if graph.should_run_cross("amounts"):
+                    all_risks.extend(cross_check_amounts(parsed_docs))
+                if graph.should_run_cross("duplicates"):
+                    all_risks.extend(detect_duplicate_invoices(invoice_rows))
+                if graph.should_run_cross("record_links"):
+                    all_risks.extend(links_to_cross_risks(links, parsed_docs))
+                if graph.should_run_cross("three_way"):
+                    all_risks.extend(detect_three_way_gaps(parsed_docs, links))
+                if graph.should_run_cross("anomalies"):
+                    all_risks.extend(detect_amount_anomalies(expense_rows))
+
+            present = {d["document_category"] for d in parsed_docs}
+            missing = check_missing_documents(present)
+
+            if graph.should_run("adjudicating"):
+                self._set_status(project, "adjudicating")
+                self._progress("adjudicating")
+                all_risks = adjudicate_risks(self.db, all_risks, agent_plan)
+                for r in all_risks:
+                    if r.get("risk_level"):
+                        scores = calculate_risk_score(
+                            r["risk_level"],
+                            r.get("evidence_json") or {},
+                            r.get("confidence", 0.9),
+                        )
+                        r["risk_score"] = scores["total_score"]
+                        r["risk_level"] = scores["risk_level"]
+
+            self._persist_risks(all_risks)
+
+            if graph.should_run("generating_report"):
+                self._set_status(project, "generating_report")
+                self._progress("generating_report")
+                self._generate_outputs(project, missing)
+
+            project.summary = self._build_summary(all_risks, missing)
+            state.update(
+                {
+                    "agent_plan": agent_plan,
+                    "execution_graph": graph.to_dict(),
+                    "missing_documents": missing,
+                    "risk_count": len(all_risks),
+                    "present_categories": list(present),
+                    "entity_count": len(entities),
+                    "link_count": len(links),
+                    "processed_file_ids": list(diff.current_file_ids),
+                    "last_incremental": {
+                        "new_file_ids": diff.new_file_ids,
+                        "new_categories": sorted(diff.new_categories),
+                    },
+                }
+            )
+            project.state_json = state
+            self._set_status(project, "completed")
+            self._progress("completed")
+            trace.step(
+                "runtime",
+                "completed",
+                {"scope": "incremental", "new_files": len(diff.new_file_ids), "risk_count": len(all_risks)},
+            )
+        except Exception as exc:
+            self._set_status(project, "failed")
+            trace.step("runtime", "failed", {"scope": "incremental", "error": str(exc)})
             raise
 
     def regenerate_outputs_only(self) -> None:
@@ -334,6 +729,117 @@ class AgentWorkflow:
         self._generate_outputs(project, missing)
         self._set_status(project, "completed")
         self._log("regenerate_outputs", "completed", {})
+
+    def _load_parsed_docs_from_db(self) -> list[dict]:
+        docs = []
+        for pd in self.db.query(ParsedDocument).filter_by(project_id=self.project_id).all():
+            f = self.db.get(FileRecord, pd.file_id)
+            if not f:
+                continue
+            docs.append(
+                {
+                    "file_id": f.id,
+                    "file_name": f.file_name,
+                    "document_category": f.document_category,
+                    "content_json": pd.content_json,
+                }
+            )
+        return docs
+
+    def _load_links_from_db(self) -> list[dict]:
+        return [
+            {
+                "project_id": l.project_id,
+                "link_type": l.link_type,
+                "source_file_id": l.source_file_id,
+                "target_file_id": l.target_file_id,
+                "link_keys": l.link_keys,
+                "confidence": l.confidence,
+                "match_method": l.match_method,
+            }
+            for l in self.db.query(RecordLink).filter_by(project_id=self.project_id).all()
+        ]
+
+    def _risk_orm_to_dict(self, r: Risk) -> dict:
+        return {
+            "risk_id": r.risk_id,
+            "risk_category": r.risk_category,
+            "risk_subcategory": r.risk_subcategory,
+            "risk_level": r.risk_level,
+            "risk_score": r.risk_score,
+            "source_file_id": r.source_file_id,
+            "source_location_json": r.source_location_json,
+            "related_files": r.related_files,
+            "problem": r.problem,
+            "evidence_json": r.evidence_json,
+            "rule_triggered": r.rule_triggered,
+            "analysis": r.analysis,
+            "suggestion": r.suggestion,
+            "correction_action": r.correction_action,
+            "manual_review_required": r.manual_review_required,
+            "confidence": r.confidence,
+        }
+
+    def _risks_from_db(self) -> list[dict]:
+        return [self._risk_orm_to_dict(r) for r in self.db.query(Risk).filter_by(project_id=self.project_id).all()]
+
+    def _collect_invoice_expense_rows(self, parsed_docs: list[dict]) -> tuple[list[dict], list[dict]]:
+        invoice_rows: list[dict] = []
+        expense_rows: list[dict] = []
+        for doc in parsed_docs:
+            if doc["document_category"] not in RULE_CATEGORIES:
+                continue
+            for sheet in doc["content_json"].get("sheets", []):
+                rows = [
+                    {
+                        "row_number": r["row_number"],
+                        "values": r["values"],
+                        "sheet_name": sheet["sheet_name"],
+                    }
+                    for r in sheet.get("rows", [])
+                ]
+                if doc["document_category"] == "expense_detail":
+                    expense_rows.extend(rows)
+                if doc["document_category"] in ("expense_detail", "invoice_list"):
+                    for r in rows:
+                        vals = r["values"]
+                        inv = vals.get("invoice_number") or vals.get("发票号") or vals.get("发票号码")
+                        if inv:
+                            invoice_rows.append(
+                                {
+                                    "invoice_number": str(inv),
+                                    "row": r["row_number"],
+                                    "file_name": doc["file_name"],
+                                }
+                            )
+        return invoice_rows, expense_rows
+
+    def _persist_risks(self, all_risks: list[dict]) -> None:
+        self.db.query(Risk).filter_by(project_id=self.project_id).delete()
+        for r in all_risks:
+            self.db.add(
+                Risk(
+                    project_id=self.project_id,
+                    risk_id=r.get("risk_id") or f"RISK-{uuid.uuid4().hex[:8]}",
+                    risk_category=r["risk_category"],
+                    risk_subcategory=r.get("risk_subcategory"),
+                    risk_level=r["risk_level"],
+                    risk_score=r.get("risk_score", 0),
+                    source_file_id=r.get("source_file_id"),
+                    source_location_json=r.get("source_location_json"),
+                    related_files=r.get("related_files"),
+                    problem=r["problem"],
+                    evidence_json=r["evidence_json"],
+                    rule_triggered=r.get("rule_triggered"),
+                    analysis=r.get("analysis"),
+                    suggestion=r["suggestion"],
+                    correction_action=r.get("correction_action", "待处理"),
+                    manual_review_required=r.get("manual_review_required", False),
+                    confidence=r.get("confidence", 0.9),
+                    status="pending",
+                )
+            )
+        self.db.commit()
 
     def _parse_file(self, f: FileRecord) -> dict:
         path = Path(f.storage_path)

@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { CyberWorkflow } from "@/components/CyberWorkflow";
 import { Block, PageTop } from "@/components/PageChrome";
 import { AgentStatus, Stats, api } from "@/lib/api";
 
@@ -18,60 +17,69 @@ export default function HomePage() {
   return (
     <>
       <PageTop
-        title="FXPG · AGENT"
-        desc="会计风险评估神经链路 · 全流程可视化追踪"
+        title="AuditAgent"
+        desc="审计助手全流程作业 · 规则引擎与 Agent 协同"
         action={
           <Link href="/projects/new" className="btn">
-            初始化项目
+            新建项目
           </Link>
         }
       />
 
-      <CyberWorkflow status="adjudicating" jobStep="adjudicating" jobPct={67} jobStatus="running" demo />
-
-      {agent && !agent.ready && (
-        <div className="alert danger">LINK DOWN · {agent.message}</div>
-      )}
-
+      {agent && !agent.ready && <div className="alert danger">Agent 未就绪 · {agent.message}</div>}
       {agent?.ready && (
-        <p className="muted" style={{ margin: "-1rem 0 1.5rem", fontFamily: "var(--mono)", fontSize: "0.75rem" }}>
-          UPLINK OK · {agent.text_model}
+        <p className="status-line">
+          <span className="status-line__dot" />
+          {agent.text_model}
           {agent.vision_ready ? ` · ${agent.vision_model}` : ""}
         </p>
       )}
+
+      <Block title="工作流程" hint="进入具体项目后，顶部 HUD 会显示真实进度">
+        <p className="muted" style={{ marginBottom: "1rem" }}>
+          创建项目 → 上传资料 → 点击「启动分析」→ 在风险 / 交付页查看结果
+        </p>
+        <Link href="/projects" className="btn btn--outline">
+          查看全部项目
+        </Link>
+      </Block>
 
       {stats && (
         <>
           <div className="metrics">
             <div className="metric">
               <div className="metric__val">{stats.project_count}</div>
-              <div className="metric__label">Projects</div>
+              <div className="metric__label">项目</div>
             </div>
             <div className="metric">
               <div className="metric__val">{stats.rule_count}</div>
-              <div className="metric__label">Rules</div>
+              <div className="metric__label">规则</div>
             </div>
             <div className="metric">
               <div className="metric__val">{stats.risk_count}</div>
-              <div className="metric__label">Risks</div>
+              <div className="metric__label">风险</div>
             </div>
             <div className="metric metric--high">
               <div className="metric__val">{stats.high_count}</div>
-              <div className="metric__label">Critical</div>
+              <div className="metric__label">高</div>
             </div>
             <div className="metric metric--mid">
               <div className="metric__val">{stats.medium_count}</div>
-              <div className="metric__label">Warning</div>
+              <div className="metric__label">中</div>
             </div>
             <div className="metric metric--low">
               <div className="metric__val">{stats.low_count}</div>
-              <div className="metric__label">Info</div>
+              <div className="metric__label">低</div>
             </div>
           </div>
 
-          <Block title="Output Matrix" hint="分析完成后自动写入">
-            <p className="muted" style={{ fontFamily: "var(--mono)", fontSize: "0.75rem", lineHeight: 1.9 }}>
-              PDF_REPORT · XLS_RISK · XLS_ANNOT · IMG_MARK · DOC_MISSING · DOC_CORRECTION
+          <Block title="交付物类型" hint="分析完成后自动生成">
+            <p className="tag-row">
+              {["PDF 报告", "风险清单", "批注 Excel", "影像标注", "缺件清单", "更正建议"].map((t) => (
+                <span key={t} className="tag">
+                  {t}
+                </span>
+              ))}
             </p>
           </Block>
         </>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode } from "react";
+import { ProjectLiveProvider } from "@/contexts/ProjectLiveContext";
 import { ProjectRail } from "@/components/ProjectRail";
 
 const MAIN_NAV = [
@@ -22,12 +23,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const projectId = projectIdFrom(pathname);
 
-  return (
+  const shell = (
     <div className="shell">
       <aside className="shell-side">
         <Link href="/" className="shell-brand">
-          <span className="shell-brand__mark">FX</span>
-          <span className="shell-brand__text">FXPG SYS</span>
+          <span className="shell-brand__mark">AA</span>
+          <span className="shell-brand__text">AuditAgent</span>
         </Link>
 
         <nav className="shell-nav">
@@ -53,4 +54,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
     </div>
   );
+
+  if (projectId) {
+    return <ProjectLiveProvider projectId={projectId}>{shell}</ProjectLiveProvider>;
+  }
+  return shell;
 }

@@ -25,7 +25,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="FXPG 会计风险评估 Agent", version="2.4.0", lifespan=lifespan)
+app = FastAPI(title="AuditAgent 会计风险评估", version="2.4.0", lifespan=lifespan)
 app.add_exception_handler(FXPGError, fxpg_exception_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 app.add_middleware(

@@ -7,9 +7,9 @@ const TABS = [
   { suffix: "", label: "概览" },
   { suffix: "/files", label: "文件资料" },
   { suffix: "/risks", label: "风险清单" },
-  { suffix: "/review", label: "人工复核" },
-  { suffix: "/outputs", label: "交付物" },
-  { suffix: "/logs", label: "审计日志" },
+  { suffix: "/outputs", label: "交付验收" },
+  { suffix: "/logs", label: "Agent 日志" },
+  { suffix: "/review", label: "逐条复核" },
 ];
 
 export function ProjectTabs({ projectId }: { projectId: string }) {

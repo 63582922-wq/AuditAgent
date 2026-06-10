@@ -2,10 +2,16 @@
   "name": "fxpg-frontend",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20 <21"
+  },
   "scripts": {
     "dev": "next dev",
+    "dev:turbo": "next dev --turbopack",
+    "dev:webpack": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "preview": "next build && next start"
   },
   "dependencies": {
     "next": "15.1.3",

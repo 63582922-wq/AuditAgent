@@ -22,12 +22,23 @@ echo "==> 启动 FastAPI (8000)"
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
-cd ../frontend
+cd ..
+NODE20="$HOME/.local/node20/bin"
+if [ -x "$NODE20/node" ]; then
+  export PATH="$NODE20:$PATH"
+  echo "==> 使用 Node $(node -v)"
+else
+  echo "==> 安装 Node 20（Next.js 需要，系统 Node $(node -v 2>/dev/null || echo missing) 不兼容）"
+  bash scripts/install-node20.sh
+  export PATH="$NODE20:$PATH"
+fi
+
+cd frontend
 echo "==> 安装前端依赖"
 npm install -q
 
 echo "==> 启动 Next.js (3000)"
-npm run dev &
+npm run dev -- -H 127.0.0.1 -p 3000 &
 FRONTEND_PID=$!
 
 echo ""
