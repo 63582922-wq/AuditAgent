@@ -1,4 +1,4 @@
-"""Unified OCR: GLM-4.6V 视觉模型优先，Tesseract 兜底。"""
+"""Unified OCR: GLM-OCR / GLM-V 视觉模型优先，Tesseract 兜底。"""
 
 from __future__ import annotations
 

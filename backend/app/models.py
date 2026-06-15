@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,14 +22,42 @@ class Project(Base):
     status: Mapped[str] = mapped_column(String(50), default="created")
     state_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
     )
 
     files: Mapped[List["FileRecord"]] = relationship(back_populates="project")
     risks: Mapped[List["Risk"]] = relationship(back_populates="project")
     outputs: Mapped[List["Output"]] = relationship(back_populates="project")
+    meetings: Mapped[List["Meeting"]] = relationship(back_populates="project")
+
+
+class Meeting(Base):
+    __tablename__ = "meetings"
+    __table_args__ = (UniqueConstraint("project_id", "meeting_code", name="uq_meetings_project_code"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_code: Mapped[str] = mapped_column(String(64))
+    meeting_title: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    observation_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    meeting_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    meeting_date: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="draft")
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    state_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    deliverable_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
+    )
+    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    project: Mapped["Project"] = relationship(back_populates="meetings")
+    files: Mapped[List["FileRecord"]] = relationship(back_populates="meeting")
+    risks: Mapped[List["Risk"]] = relationship(back_populates="meeting")
+    outputs: Mapped[List["Output"]] = relationship(back_populates="meeting")
 
 
 class FileRecord(Base):
@@ -37,6 +65,7 @@ class FileRecord(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id"), nullable=True)
     file_name: Mapped[str] = mapped_column(String(512))
     file_type: Mapped[str] = mapped_column(String(50))
     document_category: Mapped[str] = mapped_column(String(100), default="unknown")
@@ -44,9 +73,10 @@ class FileRecord(Base):
     parse_status: Mapped[str] = mapped_column(String(50), default="pending")
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     meta_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
     project: Mapped["Project"] = relationship(back_populates="files")
+    meeting: Mapped[Optional["Meeting"]] = relationship(back_populates="files")
     parsed_document: Mapped[Optional["ParsedDocument"]] = relationship(
         back_populates="file", uselist=False
     )
@@ -57,11 +87,12 @@ class ParsedDocument(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id"), nullable=True)
     file_id: Mapped[str] = mapped_column(ForeignKey("files.id"), unique=True)
     document_type: Mapped[str] = mapped_column(String(100))
     content_json: Mapped[Dict[str, Any]] = mapped_column(JSON)
     text_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
     file: Mapped["FileRecord"] = relationship(back_populates="parsed_document")
 
@@ -71,13 +102,14 @@ class ExtractedEntity(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id"), nullable=True)
     file_id: Mapped[str] = mapped_column(ForeignKey("files.id"))
     entity_type: Mapped[str] = mapped_column(String(100))
     entity_value: Mapped[str] = mapped_column(Text)
     standard_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     source_location: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
 
 class Rule(Base):
@@ -95,9 +127,9 @@ class Rule(Base):
     manual_review_required: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     priority: Mapped[int] = mapped_column(Integer, default=100)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
     )
 
 
@@ -106,6 +138,7 @@ class Risk(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id"), nullable=True)
     risk_id: Mapped[str] = mapped_column(String(50))
     risk_category: Mapped[str] = mapped_column(String(100))
     risk_subcategory: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -123,12 +156,13 @@ class Risk(Base):
     manual_review_required: Mapped[bool] = mapped_column(Boolean, default=False)
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     status: Mapped[str] = mapped_column(String(50), default="pending")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
     )
 
     project: Mapped["Project"] = relationship(back_populates="risks")
+    meeting: Mapped[Optional["Meeting"]] = relationship(back_populates="risks")
     reviews: Mapped[List["ReviewRecord"]] = relationship(back_populates="risk")
 
 
@@ -140,7 +174,7 @@ class ReviewRecord(Base):
     risk_id: Mapped[str] = mapped_column(ForeignKey("risks.id"))
     review_status: Mapped[str] = mapped_column(String(50))
     review_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
     risk: Mapped["Risk"] = relationship(back_populates="reviews")
 
@@ -153,9 +187,9 @@ class Memory(Base):
     content: Mapped[str] = mapped_column(Text)
     tags: Mapped[List[Any]] = mapped_column(JSON, default=list)
     embedding_json: Mapped[Optional[List[float]]] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
     )
 
 
@@ -164,12 +198,14 @@ class Output(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id"), nullable=True)
     output_type: Mapped[str] = mapped_column(String(100))
     file_name: Mapped[str] = mapped_column(String(512))
     storage_path: Mapped[str] = mapped_column(String(1024))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
     project: Mapped["Project"] = relationship(back_populates="outputs")
+    meeting: Mapped[Optional["Meeting"]] = relationship(back_populates="outputs")
 
 
 class AgentRunLog(Base):
@@ -177,11 +213,12 @@ class AgentRunLog(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id"), nullable=True)
     step: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(50))
     detail_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
 
 class AnalysisJob(Base):
@@ -189,6 +226,7 @@ class AnalysisJob(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="queued")
     current_step: Mapped[str] = mapped_column(String(100), default="queued")
     progress_pct: Mapped[int] = mapped_column(Integer, default=0)
@@ -196,7 +234,7 @@ class AnalysisJob(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
 
 class RecordLink(Base):
@@ -204,10 +242,11 @@ class RecordLink(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id"), nullable=True)
     link_type: Mapped[str] = mapped_column(String(100))
     source_file_id: Mapped[str] = mapped_column(String(36))
     target_file_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     link_keys: Mapped[Dict[str, Any]] = mapped_column(JSON)
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     match_method: Mapped[str] = mapped_column(String(100))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))

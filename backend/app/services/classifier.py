@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from app.config import settings
 from app.services.constants import CATEGORY_KEYWORDS, FIELD_ALIASES, HEADER_KEYWORDS
 
 
@@ -49,7 +50,20 @@ def classify_by_headers(headers: list[str]) -> dict[str, float]:
     return scores
 
 
-def classify_document(file_name: str, ext: str, headers: list[str] | None = None, text: str = "") -> dict:
+def classify_document(
+    file_name: str,
+    ext: str,
+    headers: list[str] | None = None,
+    text: str = "",
+    *,
+    domain: str | None = None,
+) -> dict:
+    domain = (domain or settings.agent_domain or "compliance").lower()
+    if domain == "compliance":
+        from app.services.domain.compliance.classifier import classify_compliance_document
+
+        return classify_compliance_document(file_name, ext, text)
+
     scores: dict[str, float] = {"unknown": 0.1}
     for part in (
         classify_by_filename(file_name),

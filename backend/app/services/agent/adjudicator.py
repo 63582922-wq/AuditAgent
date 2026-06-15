@@ -56,8 +56,14 @@ def _build_adjudicate_prompt(risks: List[Dict[str, Any]], plan: Dict[str, Any], 
                 "sub_agent": sa.get("name") if sa else None,
             }
         )
+    domain = (plan.get("agent_domain") or settings.agent_domain or "accounting").lower()
+    role_prompt = (
+        "你是会计风险评估 Agent，对工具层（规则/交叉比对）命中项做综合研判。"
+        if domain == "accounting"
+        else "你是会议合规观察（remote observation）Agent，对工具层（规则/交叉比对）命中项做综合研判。"
+    )
     return (
-        f"你是会计风险评估 Agent，对工具层（规则/交叉比对）命中项做综合研判。\n"
+        f"{role_prompt}\n"
         f"{team}"
         f"分析重点：{focus or '综合'}\n"
         f"相关记忆：\n{memory_text}\n"
@@ -83,9 +89,11 @@ def adjudicate_batch(
     mems = retrieve_memories(db, query_text=query, limit=5)
     memory_text = format_memories_for_prompt(mems)
 
+    domain = plan.get("agent_domain") or settings.agent_domain
     result = chat_json(
         [{"role": "user", "content": _build_adjudicate_prompt(risks, plan, memory_text)}],
         schema_hint='{"results":[{"risk_id":"","analysis":"","confidence":0.9,"manual_review_required":false,"risk_level":"中","reasoning":""}]}',
+        domain=domain,
     )
     by_id = {item.get("risk_id"): item for item in result.get("results") or []}
 

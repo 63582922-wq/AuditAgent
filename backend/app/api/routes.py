@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -19,6 +18,7 @@ from app.models import (
     AnalysisJob,
     ExtractedEntity,
     FileRecord,
+    Meeting,
     Memory,
     Output,
     ParsedDocument,
@@ -32,14 +32,20 @@ from app.schemas import (
     AnalyzeResponse,
     FileOut,
     JobOut,
+    MeetingBatchDelete,
+    MeetingCreate,
+    MeetingOut,
+    MeetingUpdate,
     MemoryCreate,
     MemoryOut,
+    ProjectBatchDelete,
     ProjectCreate,
     ProjectDetail,
     ProjectLiveOut,
     ProjectOut,
     ProjectOverviewOut,
     ProjectSummary,
+    ProjectUpdate,
     ReviewCreate,
     DeliverableReview,
     ReanalyzeRequest,
@@ -47,16 +53,68 @@ from app.schemas import (
     RuleCreate,
     RuleOut,
     StatsOut,
+    HarnessImportRequest,
+    HarnessRunRequest,
+    HarnessResultOut,
 )
-from app.services.agent.runtime import AgentRuntime
+from app.services.meeting_service import (
+    accept_meeting_deliverables,
+    create_meeting,
+    delete_meetings_batch,
+    delete_meeting_cascade,
+    ensure_default_meeting,
+    get_meeting,
+    list_meetings,
+    meeting_to_dict,
+    reject_meeting_deliverables,
+    sync_project_rollups,
+    update_meeting,
+)
 from app.services.agent.workflow import AgentWorkflow
+from app.services.harness_job_service import start_harness_job
 from app.services.agent.memory_writer import write_review_memory
-from app.config import settings
 from app.services.agent.llm_client import llm_available, require_agent_llm
-from app.services.jobs.worker import create_job, enqueue_analysis
+from app.services.domain.registry import get_domain_pack, resolve_agent_domain
+from app.services.jobs.worker import create_job, enqueue_analysis, enqueue_harness
+from app.services.project_live_service import (
+    build_meeting_live,
+    build_project_live,
+    latest_meeting_job as load_latest_meeting_job,
+    latest_project_job as load_latest_project_job,
+    list_meeting_logs as load_meeting_logs,
+    list_project_logs as load_project_logs,
+)
 from app.services.seed import seed_memories, seed_rules
 
 router = APIRouter(dependencies=[Depends(require_api_key)])
+
+
+def _is_compliance_project(project: Project) -> bool:
+    state = project.state_json or {}
+    return state.get("execution_mode") == "compliance_harness" or state.get("agent_domain") == "compliance"
+
+
+def _guard_compliance_uses_harness(project: Project) -> None:
+    if _is_compliance_project(project):
+        raise FXPGError(
+            "合规观察案件请使用「运行合规分析」，以确保 CMP 规则与商业交付物完整生成",
+            code="USE_HARNESS",
+            status=400,
+        )
+
+
+def _guard_server_case_path() -> None:
+    if not settings.allow_server_case_path:
+        raise FXPGError(
+            "服务器路径导入已禁用，请使用浏览器文件夹上传",
+            code="PATH_DISABLED",
+            status=403,
+        )
+
+
+def _meeting_out(db: Session, meeting: Meeting) -> MeetingOut:
+    data = meeting_to_dict(meeting, counts=True, db=db)
+    return MeetingOut(**data)
 
 
 @router.get("/agent/status")
@@ -67,27 +125,122 @@ def agent_status():
     return {
         "mode": "agent_only",
         "ready": ready,
-        "execution_mode": settings.agent_execution_mode,
-        "react_max_turns": settings.react_max_turns,
-        "text_model": settings.llm_model,
-        "text_base_url": settings.text_base_url,
-        "vision_model": settings.vision_model,
+        "agent_domain": settings.agent_domain,
+        "domain_label": get_domain_pack().label,
         "vision_ready": vision_available(),
         "message": (
             "智能体已就绪"
             if ready
-            else "请配置 LLM_API_KEY（DeepSeek）与 ENABLE_LLM=true"
+            else "请配置 LLM_API_KEY 并启用 ENABLE_LLM"
         ),
     }
 
 
 @router.post("/projects", response_model=ProjectOut)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
-    project = Project(name=payload.name, status="created")
+    project = Project(name=payload.name, status="active")
     db.add(project)
     db.commit()
     db.refresh(project)
     return project
+
+
+@router.patch("/projects/{project_id}", response_model=ProjectOut)
+def update_project(project_id: str, payload: ProjectUpdate, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if payload.name is not None:
+        project.name = payload.name.strip()
+    if payload.summary is not None:
+        project.summary = payload.summary.strip() or None
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.post("/projects/batch-delete")
+def batch_delete_projects(payload: ProjectBatchDelete, db: Session = Depends(get_db)):
+    deleted = 0
+    for pid in payload.project_ids:
+        if db.get(Project, pid):
+            _delete_project_cascade(db, pid)
+            deleted += 1
+    db.commit()
+    return {"ok": True, "deleted": deleted}
+
+
+@router.get("/projects/{project_id}/meetings", response_model=list[MeetingOut])
+def list_project_meetings(project_id: str, db: Session = Depends(get_db)):
+    meetings = list_meetings(db, project_id)
+    return [_meeting_out(db, m) for m in meetings]
+
+
+@router.post("/projects/{project_id}/meetings", response_model=MeetingOut)
+def create_project_meeting(project_id: str, payload: MeetingCreate, db: Session = Depends(get_db)):
+    meeting = create_meeting(
+        db,
+        project_id,
+        meeting_code=payload.meeting_code,
+        meeting_title=payload.meeting_title,
+        observation_type=payload.observation_type,
+        meeting_type=payload.meeting_type,
+        meeting_date=payload.meeting_date,
+    )
+    return _meeting_out(db, meeting)
+
+
+@router.get("/projects/{project_id}/meetings/{meeting_id}", response_model=MeetingOut)
+def get_project_meeting(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    return _meeting_out(db, get_meeting(db, project_id, meeting_id))
+
+
+@router.patch("/projects/{project_id}/meetings/{meeting_id}", response_model=MeetingOut)
+def patch_project_meeting(
+    project_id: str,
+    meeting_id: str,
+    payload: MeetingUpdate,
+    db: Session = Depends(get_db),
+):
+    meeting = update_meeting(
+        db,
+        project_id,
+        meeting_id,
+        meeting_code=payload.meeting_code,
+        meeting_title=payload.meeting_title,
+        observation_type=payload.observation_type,
+        meeting_type=payload.meeting_type,
+        meeting_date=payload.meeting_date,
+        summary=payload.summary,
+    )
+    return _meeting_out(db, meeting)
+
+
+@router.delete("/projects/{project_id}/meetings/{meeting_id}")
+def delete_project_meeting(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    delete_meeting_cascade(db, project_id, meeting_id)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/projects/{project_id}/meetings/batch-delete")
+def batch_delete_meetings(
+    project_id: str,
+    payload: MeetingBatchDelete,
+    db: Session = Depends(get_db),
+):
+    deleted = delete_meetings_batch(db, project_id, payload.meeting_ids)
+    return {"ok": True, "deleted": deleted}
+
+
+@router.get("/projects/{project_id}/meetings/{meeting_id}/live", response_model=ProjectLiveOut)
+def get_meeting_live(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    return build_meeting_live(db, project_id, meeting_id)
+
+
+@router.get("/projects/{project_id}/meetings/{meeting_id}/jobs/latest", response_model=Optional[JobOut])
+def latest_meeting_job(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    return load_latest_meeting_job(db, project_id, meeting_id)
 
 
 @router.get("/projects", response_model=list[ProjectOut])
@@ -105,24 +258,7 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
 
 @router.get("/projects/{project_id}/live", response_model=ProjectLiveOut)
 def get_project_live(project_id: str, db: Session = Depends(get_db)):
-    project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(404, "项目不存在")
-    file_count = db.query(FileRecord).filter_by(project_id=project_id).count()
-    risk_count = db.query(Risk).filter_by(project_id=project_id).count()
-    output_count = db.query(Output).filter_by(project_id=project_id).count()
-    return ProjectLiveOut(
-        id=project.id,
-        name=project.name,
-        status=project.status,
-        summary=project.summary,
-        created_at=project.created_at,
-        updated_at=project.updated_at,
-        state_json=project.state_json,
-        file_count=file_count,
-        risk_count=risk_count,
-        output_count=output_count,
-    )
+    return build_project_live(db, project_id)
 
 
 @router.get("/projects/{project_id}/overview", response_model=ProjectOverviewOut)
@@ -175,17 +311,30 @@ def list_project_files(project_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/projects/{project_id}/files")
-async def upload_files(
+@router.get("/projects/{project_id}/meetings/{meeting_id}/files", response_model=list[FileOut])
+def list_meeting_files(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    get_meeting(db, project_id, meeting_id)
+    return (
+        db.query(FileRecord)
+        .filter_by(project_id=project_id, meeting_id=meeting_id)
+        .order_by(FileRecord.created_at)
+        .all()
+    )
+
+
+@router.post("/projects/{project_id}/meetings/{meeting_id}/files")
+async def upload_meeting_files(
     project_id: str,
+    meeting_id: str,
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "项目不存在")
+    meeting = get_meeting(db, project_id, meeting_id)
 
-    upload_dir = settings.storage_path / "uploads" / project_id
+    upload_dir = settings.storage_path / "uploads" / project_id / meeting_id
     upload_dir.mkdir(parents=True, exist_ok=True)
     saved = []
     max_bytes = settings.max_upload_mb * 1024 * 1024
@@ -211,19 +360,61 @@ async def upload_files(
                     )
                 f.write(chunk)
 
+        from app.services.classifier import classify_document
+
+        classification = classify_document(uf.filename, ext, domain=resolve_agent_domain(project))
         rec = FileRecord(
             project_id=project_id,
+            meeting_id=meeting_id,
             file_name=uf.filename,
-            file_type="unknown",
+            file_type=classification["file_type"],
+            document_category=classification["document_category"],
             storage_path=str(dest),
+            confidence=classification["confidence"],
+            meta_json=classification,
             parse_status="uploaded",
         )
         db.add(rec)
         saved.append(uf.filename)
 
-    project.status = "uploaded"
+    meeting.status = "ready"
+    project.status = "active"
     db.commit()
     return {"uploaded": saved}
+
+
+@router.post("/projects/{project_id}/meetings/{meeting_id}/harness/run", response_model=HarnessResultOut)
+def harness_run_meeting(
+    project_id: str,
+    meeting_id: str,
+    payload: Optional[HarnessRunRequest] = None,
+    db: Session = Depends(get_db),
+):
+    get_meeting(db, project_id, meeting_id)
+    require_agent_llm()
+    req = payload or HarnessRunRequest()
+    job, created = start_harness_job(
+        db, project_id, meeting_id, skip_orchestrator=req.skip_orchestrator
+    )
+    return HarnessResultOut(
+        project_id=project_id,
+        meeting_id=meeting_id,
+        status="running",
+        message="合规分析已启动" if created else "分析任务进行中",
+        job_id=job.id,
+    )
+
+
+@router.post("/projects/{project_id}/files")
+async def upload_files(
+    project_id: str,
+    meeting_id: Optional[str] = Query(default=None),
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    if not meeting_id:
+        meeting_id = ensure_default_meeting(db, project_id).id
+    return await upload_meeting_files(project_id, meeting_id, files, db)
 
 
 @router.post("/projects/{project_id}/analyze", response_model=AnalyzeResponse)
@@ -233,6 +424,12 @@ def analyze_project(project_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "项目不存在")
     if db.query(FileRecord).filter_by(project_id=project_id).count() == 0:
         raise FXPGError("请先上传资料", code="NO_FILES", status=400)
+    if _is_compliance_project(project):
+        raise FXPGError(
+            "合规观察案件请使用「运行合规分析」，以确保 CMP 规则与商业交付物完整生成",
+            code="USE_HARNESS",
+            status=400,
+        )
     require_agent_llm()
 
     running = (
@@ -270,6 +467,7 @@ def analyze_incremental(project_id: str, db: Session = Depends(get_db)):
     state = project.state_json or {}
     if not state.get("agent_plan"):
         raise FXPGError("请先完成一次全量分析", code="NO_PRIOR_RUN", status=400)
+    _guard_compliance_uses_harness(project)
     require_agent_llm()
 
     from app.services.agent.incremental_replan import diff_uploaded_files
@@ -322,6 +520,7 @@ def reanalyze_project(
         )
     if not (project.state_json or {}).get("agent_plan"):
         raise FXPGError("请先完成一次全量分析", code="NO_PRIOR_RUN", status=400)
+    _guard_compliance_uses_harness(project)
     require_agent_llm()
 
     running = (
@@ -355,16 +554,7 @@ def reanalyze_project(
 
 @router.get("/projects/{project_id}/jobs/latest", response_model=Optional[JobOut])
 def latest_job(project_id: str, db: Session = Depends(get_db)):
-    project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(404, "项目不存在")
-    job = (
-        db.query(AnalysisJob)
-        .filter_by(project_id=project_id)
-        .order_by(AnalysisJob.created_at.desc())
-        .first()
-    )
-    return job
+    return load_latest_project_job(db, project_id)
 
 
 @router.get("/stats", response_model=StatsOut)
@@ -426,6 +616,7 @@ def _delete_project_cascade(db: Session, project_id: str) -> None:
     db.query(AnalysisJob).filter_by(project_id=project_id).delete(synchronize_session=False)
     db.query(Output).filter_by(project_id=project_id).delete(synchronize_session=False)
     db.query(FileRecord).filter_by(project_id=project_id).delete(synchronize_session=False)
+    db.query(Meeting).filter_by(project_id=project_id).delete(synchronize_session=False)
     for sub in ("uploads", "outputs"):
         path = settings.storage_path / sub / project_id
         if path.exists():
@@ -452,6 +643,151 @@ def toggle_rule(rule_db_id: str, db: Session = Depends(get_db)):
     rule.enabled = not rule.enabled
     db.commit()
     return {"ok": True, "enabled": rule.enabled}
+
+
+@router.get("/projects/{project_id}/meetings/{meeting_id}/risks", response_model=list[RiskOut])
+def list_meeting_risks(
+    project_id: str,
+    meeting_id: str,
+    level: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    get_meeting(db, project_id, meeting_id)
+    q = db.query(Risk).filter_by(project_id=project_id, meeting_id=meeting_id)
+    if level:
+        q = q.filter(Risk.risk_level == level)
+    return q.order_by(Risk.risk_score.desc()).all()
+
+
+@router.get("/projects/{project_id}/meetings/{meeting_id}/outputs")
+def list_meeting_outputs(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    get_meeting(db, project_id, meeting_id)
+    return db.query(Output).filter_by(project_id=project_id, meeting_id=meeting_id).all()
+
+
+@router.get("/projects/{project_id}/meetings/{meeting_id}/logs", response_model=list)
+def list_meeting_logs(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    return load_meeting_logs(db, project_id, meeting_id)
+
+
+@router.post("/projects/{project_id}/meetings/{meeting_id}/regenerate-outputs")
+def regenerate_meeting_outputs(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    get_meeting(db, project_id, meeting_id)
+    if db.query(Risk).filter_by(project_id=project_id, meeting_id=meeting_id).count() == 0:
+        raise FXPGError("请先完成分析", code="NO_RISKS", status=400)
+    AgentWorkflow(db, project_id, meeting_id=meeting_id).regenerate_outputs_only()
+    return {"ok": True, "message": "交付物已重新生成"}
+
+
+@router.post("/projects/{project_id}/meetings/{meeting_id}/reanalyze", response_model=AnalyzeResponse)
+def reanalyze_meeting(
+    project_id: str,
+    meeting_id: str,
+    payload: ReanalyzeRequest,
+    db: Session = Depends(get_db),
+):
+    meeting = get_meeting(db, project_id, meeting_id)
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if payload.scope not in ("cross_checking", "adjudicating"):
+        raise FXPGError(
+            "scope 须为 cross_checking 或 adjudicating",
+            code="INVALID_SCOPE",
+            status=400,
+        )
+    if not (meeting.state_json or {}).get("agent_plan"):
+        raise FXPGError("请先完成一次全量分析", code="NO_PRIOR_RUN", status=400)
+    _guard_compliance_uses_harness(project)
+    require_agent_llm()
+
+    running = (
+        db.query(AnalysisJob)
+        .filter_by(project_id=project_id, meeting_id=meeting_id)
+        .filter(AnalysisJob.status.in_(["queued", "running"]))
+        .first()
+    )
+    if running:
+        return AnalyzeResponse(
+            project_id=project_id,
+            status="running",
+            message="已有任务进行中",
+            job_id=running.id,
+        )
+
+    job = create_job(db, project_id, meeting_id=meeting_id)
+    state = dict(meeting.state_json or {})
+    state["pending_scope"] = payload.scope
+    meeting.state_json = state
+    meeting.status = payload.scope
+    db.commit()
+    enqueue_analysis(job.id, project_id, scope=payload.scope)
+    return AnalyzeResponse(
+        project_id=project_id,
+        status="running",
+        message=f"局部重跑已启动（{payload.scope}）",
+        job_id=job.id,
+    )
+
+
+@router.post("/projects/{project_id}/meetings/{meeting_id}/deliverables/accept")
+def accept_meeting_deliverables_route(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    meeting = accept_meeting_deliverables(db, project_id, meeting_id)
+    return {"ok": True, "status": meeting.status}
+
+
+@router.post("/projects/{project_id}/meetings/{meeting_id}/deliverables/reject")
+def reject_meeting_deliverables_route(
+    project_id: str,
+    meeting_id: str,
+    payload: DeliverableReview,
+    db: Session = Depends(get_db),
+):
+    meeting = get_meeting(db, project_id, meeting_id)
+    comment = payload.comment or ""
+
+    if payload.reanalyze:
+        require_agent_llm()
+        running = (
+            db.query(AnalysisJob)
+            .filter_by(project_id=project_id, meeting_id=meeting_id)
+            .filter(AnalysisJob.status.in_(["queued", "running"]))
+            .first()
+        )
+        if running:
+            return {
+                "ok": True,
+                "status": "running",
+                "message": "已有分析任务进行中",
+                "job_id": running.id,
+            }
+        state = dict(meeting.state_json or {})
+        state["deliverable"] = {"status": "pending", "comment": comment}
+        if comment:
+            state["deliverable_feedback"] = comment
+            plan = dict(state.get("agent_plan") or {})
+            plan["deliverable_feedback"] = comment
+            state["agent_plan"] = plan
+        meeting.state_json = state
+        meeting.status = "planning"
+        db.commit()
+        job = create_job(db, project_id, meeting_id=meeting_id)
+        agent_domain = state.get("agent_domain") or settings.agent_domain
+        execution_mode = state.get("execution_mode")
+        if execution_mode == "compliance_harness" or agent_domain == "compliance":
+            enqueue_harness(job.id, project_id, meeting_id)
+        else:
+            enqueue_analysis(job.id, project_id, scope="full")
+        sync_project_rollups(db, project_id)
+        return {
+            "ok": True,
+            "status": "running",
+            "message": "已根据退回意见重新分析",
+            "job_id": job.id,
+        }
+
+    meeting = reject_meeting_deliverables(db, project_id, meeting_id, comment)
+    return {"ok": True, "status": meeting.status, "comment": comment}
 
 
 @router.get("/projects/{project_id}/risks", response_model=list[RiskOut])
@@ -515,21 +851,10 @@ def regenerate_outputs(project_id: str, db: Session = Depends(get_db)):
 
 @router.post("/projects/{project_id}/deliverables/accept")
 def accept_deliverables(project_id: str, db: Session = Depends(get_db)):
-    project = db.get(Project, project_id)
-    if not project:
+    if not db.get(Project, project_id):
         raise HTTPException(404, "项目不存在")
-    if project.status not in ("completed", "needs_review"):
-        raise FXPGError("分析尚未完成，无法验收", code="NOT_READY", status=400)
-    state = dict(project.state_json or {})
-    state["deliverable"] = {
-        "status": "accepted",
-        "comment": "",
-        "accepted_at": datetime.now(timezone.utc).isoformat(),
-    }
-    project.state_json = state
-    project.status = "accepted"
-    db.commit()
-    return {"ok": True, "status": project.status}
+    meeting = ensure_default_meeting(db, project_id)
+    return accept_meeting_deliverables_route(project_id, meeting.id, db)
 
 
 @router.post("/projects/{project_id}/deliverables/reject")
@@ -538,57 +863,10 @@ def reject_deliverables(
     payload: DeliverableReview,
     db: Session = Depends(get_db),
 ):
-    project = db.get(Project, project_id)
-    if not project:
+    if not db.get(Project, project_id):
         raise HTTPException(404, "项目不存在")
-    if project.status not in ("completed", "needs_review", "accepted"):
-        raise FXPGError("当前状态不可退回", code="NOT_READY", status=400)
-
-    state = dict(project.state_json or {})
-    comment = payload.comment or ""
-    state["deliverable"] = {
-        "status": "rejected",
-        "comment": comment,
-        "rejected_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if comment:
-        state["deliverable_feedback"] = comment
-        plan = dict(state.get("agent_plan") or {})
-        plan["deliverable_feedback"] = comment
-        state["agent_plan"] = plan
-
-    if payload.reanalyze:
-        require_agent_llm()
-        running = (
-            db.query(AnalysisJob)
-            .filter_by(project_id=project_id)
-            .filter(AnalysisJob.status.in_(["queued", "running"]))
-            .first()
-        )
-        if running:
-            return {
-                "ok": True,
-                "status": "running",
-                "message": "已有分析任务进行中",
-                "job_id": running.id,
-            }
-        state["deliverable"] = {"status": "pending", "comment": comment}
-        project.state_json = state
-        project.status = "planning"
-        db.commit()
-        job = create_job(db, project_id)
-        enqueue_analysis(job.id, project_id)
-        return {
-            "ok": True,
-            "status": "running",
-            "message": "已根据退回意见重新分析",
-            "job_id": job.id,
-        }
-
-    project.state_json = state
-    project.status = "deliverable_rejected"
-    db.commit()
-    return {"ok": True, "status": project.status, "comment": comment}
+    meeting = ensure_default_meeting(db, project_id)
+    return reject_meeting_deliverables_route(project_id, meeting.id, payload, db)
 
 
 @router.get("/projects/{project_id}/outputs")
@@ -619,18 +897,7 @@ def download_output(
 
 @router.get("/projects/{project_id}/logs", response_model=list)
 def list_logs(project_id: str, db: Session = Depends(get_db)):
-    rows = db.query(AgentRunLog).filter_by(project_id=project_id).order_by(AgentRunLog.created_at).all()
-    return [
-        {
-            "id": r.id,
-            "step": r.step,
-            "status": r.status,
-            "detail_json": r.detail_json,
-            "duration_ms": r.duration_ms,
-            "created_at": r.created_at.isoformat() + "Z" if r.created_at else None,
-        }
-        for r in rows
-    ]
+    return load_project_logs(db, project_id)
 
 
 @router.get("/rules", response_model=list[RuleOut])
@@ -707,3 +974,189 @@ def create_memory(payload: MemoryCreate, db: Session = Depends(get_db)):
         sync_memory_vector(db, mem.id, mem.embedding_json)
         db.commit()
     return mem
+
+
+@router.post("/harness/import", response_model=HarnessResultOut)
+def harness_import_case(payload: HarnessImportRequest, db: Session = Depends(get_db)):
+    """从服务器本地案件目录导入观察资料（需 ALLOW_SERVER_CASE_PATH=true）。"""
+    _guard_server_case_path()
+    from app.services.agent.harness import ComplianceHarness
+
+    case_path = Path(payload.case_path).expanduser().resolve()
+    if not case_path.is_dir():
+        raise FXPGError(f"案件目录不存在: {case_path}", code="CASE_NOT_FOUND", status=400)
+
+    harness = ComplianceHarness(db)
+    project_id, meeting_id, profile = harness.import_case(case_path, payload.project_name)
+    return HarnessResultOut(
+        project_id=project_id,
+        meeting_id=meeting_id,
+        status="imported",
+        meeting_code=str(profile.get("meeting_code") or ""),
+        finding_count=0,
+        meeting_case=profile,
+    )
+
+
+@router.post("/projects/{project_id}/harness/import-upload", response_model=HarnessResultOut)
+async def harness_import_project_upload(
+    project_id: str,
+    files: list[UploadFile] = File(...),
+    meeting_title: Optional[str] = Form(None),
+    run_analysis: bool = Form(default=True),
+    db: Session = Depends(get_db),
+):
+    """向已有观察项目导入 FX 资料包：新建子会议、入库，可选立即运行分析。"""
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    from app.services.agent.harness import ComplianceHarness
+    from app.services.domain.compliance.case_upload import cleanup_staged_case, stage_case_upload
+
+    case_dir = await stage_case_upload(files)
+    try:
+        harness = ComplianceHarness(db)
+        pid, meeting_id, profile = harness.import_case(
+            case_dir, meeting_title, project_id=project_id
+        )
+        if run_analysis:
+            require_agent_llm()
+            job, created = start_harness_job(db, pid, meeting_id)
+            return HarnessResultOut(
+                project_id=pid,
+                meeting_id=meeting_id,
+                status="running",
+                message="已导入并启动分析" if created else "分析任务进行中",
+                job_id=job.id,
+                meeting_code=str(profile.get("meeting_code") or ""),
+                finding_count=0,
+                meeting_case=profile,
+            )
+        return HarnessResultOut(
+            project_id=pid,
+            meeting_id=meeting_id,
+            status="imported",
+            meeting_code=str(profile.get("meeting_code") or ""),
+            finding_count=0,
+            meeting_case=profile,
+        )
+    finally:
+        cleanup_staged_case(case_dir)
+
+
+@router.post("/harness/import-upload", response_model=HarnessResultOut)
+async def harness_import_case_upload(
+    files: list[UploadFile] = File(...),
+    project_name: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """从浏览器选择文件夹上传并导入案件。"""
+    from app.services.agent.harness import ComplianceHarness
+    from app.services.domain.compliance.case_upload import cleanup_staged_case, stage_case_upload
+
+    case_dir = await stage_case_upload(files)
+    try:
+        harness = ComplianceHarness(db)
+        project_id, meeting_id, profile = harness.import_case(case_dir, project_name)
+        return HarnessResultOut(
+            project_id=project_id,
+            meeting_id=meeting_id,
+            status="imported",
+            meeting_code=str(profile.get("meeting_code") or ""),
+            finding_count=0,
+            meeting_case=profile,
+        )
+    finally:
+        cleanup_staged_case(case_dir)
+
+
+@router.post("/harness/run-case-upload", response_model=HarnessResultOut)
+async def harness_run_case_upload(
+    files: list[UploadFile] = File(...),
+    project_name: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """从浏览器选择文件夹上传、导入并异步运行 Harness。"""
+    from app.services.agent.harness import ComplianceHarness
+    from app.services.domain.compliance.case_upload import cleanup_staged_case, stage_case_upload
+
+    case_dir = await stage_case_upload(files)
+    try:
+        harness = ComplianceHarness(db)
+        project_id, meeting_id, profile = harness.import_case(case_dir, project_name)
+        job, created = start_harness_job(db, project_id, meeting_id)
+        return HarnessResultOut(
+            project_id=project_id,
+            meeting_id=meeting_id,
+            status="running",
+            message="已导入并启动 Harness" if created else "Harness 任务进行中",
+            job_id=job.id,
+            meeting_code=str(profile.get("meeting_code") or ""),
+            finding_count=0,
+            meeting_case=profile,
+        )
+    finally:
+        cleanup_staged_case(case_dir)
+
+
+@router.post("/projects/{project_id}/harness/run", response_model=HarnessResultOut)
+def harness_run_project(
+    project_id: str,
+    payload: Optional[HarnessRunRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """对已导入项目异步运行合规 Agent Harness（返回 job_id，前端轮询实时进度）。"""
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if db.query(FileRecord).filter_by(project_id=project_id).count() == 0:
+        raise FXPGError("请先导入或上传资料", code="NO_FILES", status=400)
+
+    require_agent_llm()
+    req = payload or HarnessRunRequest()
+    meeting_id = req.meeting_id
+    if not meeting_id:
+        meeting = (
+            db.query(Meeting)
+            .filter_by(project_id=project_id)
+            .order_by(Meeting.updated_at.desc())
+            .first()
+        )
+        if not meeting:
+            meeting = ensure_default_meeting(db, project_id)
+        meeting_id = meeting.id
+    job, created = start_harness_job(
+        db, project_id, meeting_id, skip_orchestrator=req.skip_orchestrator
+    )
+    return HarnessResultOut(
+        project_id=project_id,
+        meeting_id=meeting_id,
+        status="running",
+        message="Harness 已启动，请查看顶部运行管线" if created else "Harness 任务进行中",
+        job_id=job.id,
+    )
+
+
+@router.post("/harness/run-case", response_model=HarnessResultOut)
+def harness_run_case(payload: HarnessImportRequest, db: Session = Depends(get_db)):
+    """导入 FX 案件目录并异步运行 Harness（需 ALLOW_SERVER_CASE_PATH=true）。"""
+    _guard_server_case_path()
+    from app.services.agent.harness import ComplianceHarness
+
+    case_path = Path(payload.case_path).expanduser().resolve()
+    if not case_path.is_dir():
+        raise FXPGError(f"案件目录不存在: {case_path}", code="CASE_NOT_FOUND", status=400)
+
+    harness = ComplianceHarness(db)
+    project_id, meeting_id, profile = harness.import_case(case_path, payload.project_name)
+    job, created = start_harness_job(db, project_id, meeting_id)
+    return HarnessResultOut(
+        project_id=project_id,
+        meeting_id=meeting_id,
+        status="running",
+        message="已导入并启动 Harness" if created else "Harness 任务进行中",
+        job_id=job.id,
+        meeting_code=str(profile.get("meeting_code") or ""),
+        finding_count=0,
+        meeting_case=profile,
+    )

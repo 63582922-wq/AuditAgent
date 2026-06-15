@@ -29,7 +29,7 @@ services:
       LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
       VISION_API_KEY: ${VISION_API_KEY:-}
       VISION_BASE_URL: ${VISION_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
-      VISION_MODEL: ${VISION_MODEL:-glm-4.6v}
+      VISION_MODEL: ${VISION_MODEL:-glm-ocr}
       ENABLE_LLM: ${ENABLE_LLM:-true}
     volumes:
       - storage:/app/storage
@@ -38,7 +38,11 @@ services:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE: http://localhost:8000/api
+        NEXT_PUBLIC_API_KEY: ${API_KEY:-}
     ports:
       - "3000:3000"
     environment:

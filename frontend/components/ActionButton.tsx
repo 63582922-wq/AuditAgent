@@ -1,6 +1,7 @@
 "use client";
 
 import { ButtonHTMLAttributes, ReactNode, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
   loading?: boolean;
@@ -11,7 +12,7 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 export function ActionButton({
   loading,
-  loadingLabel = "处理中…",
+  loadingLabel,
   variant = "primary",
   className = "",
   disabled,
@@ -19,10 +20,10 @@ export function ActionButton({
   children,
   ...rest
 }: Props) {
+  const { t } = useI18n();
   const [pending, setPending] = useState(false);
   const busy = loading || pending;
-  const cls =
-    variant === "outline" ? "btn-outline" : variant === "ghost" ? "btn-ghost" : "btn";
+  const cls = "btn-text";
 
   async function handleClick(e: React.MouseEvent<HTMLButtonElement>) {
     if (busy || !onClick) return;
@@ -42,7 +43,7 @@ export function ActionButton({
       disabled={disabled || busy}
       onClick={handleClick}
     >
-      {busy ? loadingLabel : children}
+      {busy ? loadingLabel ?? t("common.processing") : children}
     </button>
   );
 }

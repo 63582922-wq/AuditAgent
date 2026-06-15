@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>什么是流线型视觉 · AuditAgent 重做</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Outfit, "PingFang SC", sans-serif;
+      background: #030508;
+      color: #dce4ec;
+      min-height: 100dvh;
+    }
+
+    /* ── 说明条 ── */
+    .intro {
+      position: sticky; top: 0; z-index: 200;
+      padding: 1rem 1.5rem 1.25rem;
+      background: rgba(3, 5, 8, 0.94);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(120, 160, 200, 0.1);
+    }
+    .intro h1 {
+      font-size: 1rem; font-weight: 600; letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+    }
+    .intro p {
+      font-size: 0.8125rem; color: #7a8a9c; line-height: 1.65; max-width: 720px;
+    }
+    .intro strong { color: #a8c4d8; font-weight: 500; }
+    .intro .wrong { color: #c47070; text-decoration: line-through; opacity: 0.85; }
+    .tabs {
+      display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap;
+    }
+    .tabs button {
+      font: inherit; font-size: 0.75rem; font-weight: 500;
+      padding: 0.4rem 0.85rem; border-radius: 999px;
+      border: 1px solid rgba(120, 160, 200, 0.2);
+      background: transparent; color: #7a8a9c; cursor: pointer;
+      transition: 0.25s;
+    }
+    .tabs button.on {
+      border-color: rgba(100, 200, 230, 0.5);
+      color: #64c8e6;
+      background: rgba(100, 200, 230, 0.08);
+    }
+
+    .scene { display: none; min-height: calc(100dvh - 140px); position: relative; overflow: hidden; }
+    .scene.on { display: block; }
+
+    /* ═══════════════════════════════════════════
+       01 · 风洞层流 — 流线本身是界面结构
+       参考：CFD 烟线、翼型剖面、高铁风洞
+       ═══════════════════════════════════════════ */
+    .s1 { background: #04060a; }
+    .s1 .field {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+    }
+    .s1 .field line, .s1 .field path {
+      fill: none;
+      stroke: rgba(80, 140, 180, 0.08);
+      stroke-width: 1;
+    }
+    .s1 .field path.highlight {
+      stroke: rgba(100, 200, 230, 0.35);
+      stroke-width: 1.5;
+      filter: drop-shadow(0 0 6px rgba(100, 200, 230, 0.3));
+    }
+    .s1 .fuselage {
+      position: relative; z-index: 2;
+      margin: 2rem auto 3rem;
+      width: min(1100px, 94vw);
+      min-height: 520px;
+    }
+    /* 纺锤形外壳 — 不是圆角矩形 */
+    .s1 .hull {
+      position: relative;
+      padding: 2.5rem 3rem 2.5rem 2.5rem;
+      background: linear-gradient(
+        112deg,
+        rgba(12, 22, 36, 0.92) 0%,
+        rgba(8, 14, 24, 0.88) 45%,
+        rgba(16, 28, 44, 0.75) 100%
+      );
+      clip-path: path("M 0 50 Q 0 0 80 0 L calc(100% - 80px) 0 Q 100% 0 100% 50 Q 100% 100% calc(100% - 80px) 100% L 80 100% Q 0 100% 0 50 Z");
+      /* fallback for browsers without path() clip — ellipse approximation */
+      border-radius: 50% / 8%;
+      box-shadow:
+        0 0 0 1px rgba(100, 180, 220, 0.12),
+        0 40px 100px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    @supports (clip-path: path("M0 0")) {
+      .s1 .hull { border-radius: 0; }
+    }
+    .s1 .hull::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 15%; bottom: 15%; width: 3px;
+      background: linear-gradient(180deg, transparent, #64c8e6, transparent);
+      border-radius: 999px;
+      opacity: 0.6;
+    }
+    .s1 .layout {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 2rem;
+      align-items: start;
+    }
+    .s1 .nav-flow {
+      display: flex; flex-direction: column; gap: 0;
+      position: relative;
+      padding-left: 1rem;
+    }
+    .s1 .nav-flow::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 8px; bottom: 8px; width: 2px;
+      background: linear-gradient(180deg,
+        transparent 0%,
+        rgba(100, 200, 230, 0.2) 20%,
+        rgba(100, 200, 230, 0.5) 50%,
+        rgba(100, 200, 230, 0.2) 80%,
+        transparent 100%);
+      border-radius: 999px;
+    }
+    .s1 .nav-flow a {
+      position: relative;
+      padding: 0.55rem 0 0.55rem 1.25rem;
+      font-size: 0.8125rem;
+      color: #6a7a8c;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .s1 .nav-flow a::before {
+      content: "";
+      position: absolute;
+      left: -5px; top: 50%;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #0a1018;
+      border: 2px solid rgba(100, 200, 230, 0.25);
+      transform: translateY(-50%);
+      transition: all 0.25s;
+    }
+    .s1 .nav-flow a.active { color: #e8f0f8; }
+    .s1 .nav-flow a.active::before {
+      background: #64c8e6;
+      border-color: #64c8e6;
+      box-shadow: 0 0 12px rgba(100, 200, 230, 0.6);
+    }
+    .s1 .crumb {
+      font-size: 0.6875rem; color: #5a6a7c;
+      margin-bottom: 1.5rem; letter-spacing: 0.02em;
+    }
+    .s1 .stream-progress {
+      margin-bottom: 2rem;
+    }
+    .s1 .stream-progress svg { width: 100%; height: 48px; display: block; }
+    .s1 .stream-label {
+      display: flex; justify-content: space-between;
+      font-size: 0.6875rem; color: #6a7a8c;
+      margin-top: 0.5rem;
+      font-family: "IBM Plex Mono", monospace;
+    }
+    .s1 .stream-label em { color: #64c8e6; font-style: normal; }
+    .s1 .hero-curve {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 1.5rem;
+      align-items: center;
+      margin-bottom: 2rem;
+    }
+    .s1 .lens {
+      width: 120px; height: 120px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, rgba(100, 200, 230, 0.15), rgba(8, 16, 28, 0.9));
+      box-shadow:
+        inset 0 0 0 1px rgba(100, 200, 230, 0.25),
+        0 0 40px rgba(100, 200, 230, 0.08);
+      display: grid; place-items: center;
+      position: relative;
+    }
+    .s1 .lens svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+    .s1 .lens span {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 1.25rem; font-weight: 500;
+      color: #64c8e6;
+      z-index: 1;
+    }
+    .s1 .hero-curve h2 {
+      font-size: 1.5rem; font-weight: 500;
+      letter-spacing: -0.03em;
+      font-weight: 300;
+    }
+    .s1 .hero-curve h2 b { font-weight: 600; color: #fff; }
+    .s1 .hero-curve p {
+      margin-top: 0.5rem; font-size: 0.875rem;
+      color: #7a8a9c; line-height: 1.6; max-width: 480px;
+    }
+    .s1 .metrics-flow {
+      display: flex; gap: 0;
+      align-items: stretch;
+    }
+    .s1 .metric-pod {
+      flex: 1;
+      padding: 1rem 1.25rem;
+      position: relative;
+      text-align: center;
+    }
+    .s1 .metric-pod + .metric-pod::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 20%; bottom: 20%; width: 1px;
+      background: linear-gradient(180deg, transparent, rgba(100, 200, 230, 0.2), transparent);
+    }
+    .s1 .metric-pod label {
+      font-size: 0.625rem; letter-spacing: 0.12em;
+      text-transform: uppercase; color: #5a6a7c;
+    }
+    .s1 .metric-pod b {
+      display: block; margin-top: 0.35rem;
+      font-size: 1.75rem; font-weight: 300;
+      letter-spacing: -0.04em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ═══════════════════════════════════════════
+       02 · 层流带 — 横向曲面叠层，无侧栏方块
+       ═══════════════════════════════════════════ */
+    .s2 { background: #050810; padding: 2rem 0 4rem; }
+    .s2 .wrap { width: min(1000px, 92vw); margin: 0 auto; }
+    .s2 .brand-row {
+      display: flex; align-items: baseline; gap: 1rem;
+      margin-bottom: 2.5rem; padding-left: 2rem;
+    }
+    .s2 .brand-row span {
+      font-size: 0.6875rem; letter-spacing: 0.2em;
+      text-transform: uppercase; color: #64c8e6;
+    }
+    .s2 .brand-row h2 {
+      font-size: 0.875rem; font-weight: 400; color: #8a9aac;
+    }
+    .s2 .band {
+      position: relative;
+      margin-bottom: -12px;
+      padding: 1.25rem 2rem 1.25rem 3rem;
+      background: linear-gradient(90deg, rgba(100, 200, 230, 0.06) 0%, rgba(12, 20, 32, 0.6) 30%, rgba(12, 20, 32, 0.4) 100%);
+      border: 1px solid rgba(100, 180, 220, 0.08);
+      transform-origin: left center;
+    }
+    .s2 .band:nth-child(2) { transform: scaleX(0.98) translateX(8px); opacity: 0.95; border-radius: 0 999px 999px 0; }
+    .s2 .band:nth-child(3) { transform: scaleX(0.96) translateX(16px); opacity: 0.9; border-radius: 0 999px 999px 0; }
+    .s2 .band:nth-child(4) { transform: scaleX(0.94) translateX(24px); opacity: 0.85; border-radius: 0 999px 999px 0; }
+    .s2 .band:nth-child(5) { transform: scaleX(0.92) translateX(32px); opacity: 0.8; border-radius: 0 999px 999px 0; }
+    .s2 .band.main {
+      padding: 2rem 2.5rem 2rem 3.5rem;
+      background: linear-gradient(105deg, rgba(100, 200, 230, 0.1) 0%, rgba(8, 14, 24, 0.95) 35%);
+      border-radius: 0 120px 120px 0;
+      transform: none;
+      opacity: 1;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+    .s2 .band label {
+      font-size: 0.625rem; letter-spacing: 0.15em;
+      color: #64c8e6; text-transform: uppercase;
+    }
+    .s2 .band .txt { font-size: 0.8125rem; color: #8a9aac; margin-top: 0.2rem; }
+    .s2 .band.main h3 {
+      font-size: 1.375rem; font-weight: 300;
+      letter-spacing: -0.03em; margin-top: 0.35rem;
+    }
+    .s2 .band.main h3 strong { font-weight: 600; }
+    .s2 .band.main p { font-size: 0.875rem; color: #7a8a9c; margin-top: 0.5rem; max-width: 520px; line-height: 1.6; }
+    .s2 .flow-bar {
+      margin-top: 1.25rem; height: 4px;
+      background: rgba(100, 180, 220, 0.1);
+      border-radius: 999px; overflow: hidden;
+      max-width: 480px;
+    }
+    .s2 .flow-bar i {
+      display: block; height: 100%; width: 38%;
+      background: linear-gradient(90deg, #3a8aaa, #64c8e6, #8ad4f0);
+      border-radius: 999px;
+      box-shadow: 0 0 20px rgba(100, 200, 230, 0.5);
+    }
+    .s2 .band-row {
+      display: flex; gap: 2rem; margin-top: 1.5rem;
+      font-family: "IBM Plex Mono", monospace; font-size: 0.75rem; color: #6a7a8c;
+    }
+    .s2 .band-row b { color: #dce4ec; font-weight: 500; margin-left: 0.35rem; }
+
+    /* ═══════════════════════════════════════════
+       03 · 翼型剖面 — 进度即翼型填充
+       ═══════════════════════════════════════════ */
+    .s3 {
+      background: radial-gradient(ellipse 120% 80% at 50% 0%, #0c1420 0%, #030508 55%);
+      display: flex; align-items: center; justify-content: center;
+      min-height: calc(100dvh - 140px);
+      padding: 2rem;
+    }
+    .s3 .airfoil-card {
+      width: min(880px, 100%);
+      position: relative;
+    }
+    .s3 .airfoil-svg { width: 100%; height: auto; display: block; }
+    .s3 .airfoil-content {
+      position: absolute;
+      inset: 12% 8% 18% 10%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .s3 .meta {
+      font-size: 0.6875rem; color: #5a7a8c;
+      letter-spacing: 0.08em;
+      font-family: "IBM Plex Mono", monospace;
+    }
+    .s3 h2 {
+      font-size: clamp(1.25rem, 3vw, 1.75rem);
+      font-weight: 300; letter-spacing: -0.03em;
+      margin-top: 0.5rem;
+    }
+    .s3 h2 em { font-style: normal; color: #64c8e6; font-weight: 500; }
+    .s3 .file {
+      margin-top: 0.75rem; font-size: 0.8125rem; color: #6a8090;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .s3 .stats {
+      display: flex; gap: 2.5rem; margin-top: 1.75rem;
+    }
+    .s3 .stats div label { font-size: 0.625rem; color: #5a6a7c; letter-spacing: 0.1em; }
+    .s3 .stats div b {
+      display: block; font-size: 1.5rem; font-weight: 300;
+      margin-top: 0.2rem; font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+  <header class="intro">
+    <h1>流线型 ≠ 圆角 + 深色 + 青色 accent</h1>
+    <p>
+      <strong>流线型视觉</strong>来自空气动力学/工业造型：轮廓是<strong>连续曲线</strong>（纺锤、翼型、水滴），
+      视线沿<strong>层流方向</strong>移动，界面像被气流「削」出来——不是卡片、边框、HUD 框堆叠。
+      之前三稿失败原因：<span class="wrong">矩形布局 + 换配色 + 假科幻装饰</span>。
+    </p>
+    <div class="tabs">
+      <button type="button" class="on" data-scene="s1">01 风洞层流 · 纺锤舱体</button>
+      <button type="button" data-scene="s2">02 层流带 · 横向曲面叠层</button>
+      <button type="button" data-scene="s3">03 翼型剖面 · 进度即形态</button>
+    </div>
+  </header>
+
+  <!-- Scene 1: Wind tunnel streamlines + fuselage hull -->
+  <section class="scene s1 on" id="s1">
+    <svg class="field" viewBox="0 0 1440 800" preserveAspectRatio="xMidYMid slice">
+      <defs>
+        <linearGradient id="sl" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="rgba(100,200,230,0)" />
+          <stop offset="40%" stop-color="rgba(100,200,230,0.15)" />
+          <stop offset="100%" stop-color="rgba(100,200,230,0)" />
+        </linearGradient>
+      </defs>
+      <!-- 平行层流线 -->
+      <path d="M-50 120 Q200 100 500 115 T1100 105 T1500 110" stroke="rgba(80,140,180,0.06)" fill="none"/>
+      <path d="M-50 180 Q220 160 520 175 T1120 165 T1500 170" stroke="rgba(80,140,180,0.06)" fill="none"/>
+      <path d="M-50 240 Q240 220 540 235 T1140 225 T1500 230" stroke="rgba(80,140,180,0.06)" fill="none"/>
+      <path d="M-50 300 Q260 280 560 295 T1160 285 T1500 290" stroke="rgba(80,140,180,0.06)" fill="none"/>
+      <path d="M-50 360 Q280 340 580 355 T1180 345 T1500 350" class="highlight" stroke="url(#sl)" fill="none"/>
+      <path d="M-50 420 Q300 400 600 415 T1200 405 T1500 410" stroke="rgba(80,140,180,0.06)" fill="none"/>
+      <path d="M-50 480 Q320 460 620 475 T1220 465 T1500 470" stroke="rgba(80,140,180,0.06)" fill="none"/>
+      <path d="M-50 540 Q340 520 640 535 T1240 525 T1500 530" stroke="rgba(80,140,180,0.06)" fill="none"/>
+      <path d="M-50 600 Q360 580 660 595 T1260 585 T1500 590" stroke="rgba(80,140,180,0.06)" fill="none"/>
+      <path d="M-50 660 Q380 640 680 655 T1280 645 T1500 650" stroke="rgba(80,140,180,0.06)" fill="none"/>
+    </svg>
+    <div class="fuselage">
+      <div class="hull">
+        <div class="layout">
+          <div>
+            <div class="crumb">唐山会议 / A1P260307357</div>
+            <nav class="nav-flow">
+              <a href="#">总览</a>
+              <a href="#" class="active">分析运行</a>
+              <a href="#">资料</a>
+              <a href="#">Finding</a>
+              <a href="#">交付</a>
+            </nav>
+          </div>
+          <div>
+            <div class="stream-progress">
+              <svg viewBox="0 0 600 48" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="prog" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stop-color="#3a7a94"/>
+                    <stop offset="100%" stop-color="#64c8e6"/>
+                  </linearGradient>
+                </defs>
+                <!-- 翼型剖面状进度槽 -->
+                <path d="M0 24 Q0 4 40 4 L560 4 Q600 4 600 24 Q600 44 560 44 L40 44 Q0 44 0 24 Z"
+                  fill="rgba(100,180,220,0.08)" stroke="rgba(100,200,230,0.2)" stroke-width="1"/>
+                <path d="M0 24 Q0 8 30 8 L228 8 Q248 8 248 24 Q248 40 228 40 L30 40 Q0 40 0 24 Z"
+                  fill="url(#prog)" opacity="0.9"/>
+              </svg>
+              <div class="stream-label">
+                <span>解析文档</span>
+                <em>38%</em>
+              </div>
+            </div>
+            <div class="hero-curve">
+              <div class="lens">
+                <svg viewBox="0 0 120 120">
+                  <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(100,200,230,0.12)" stroke-width="3"/>
+                  <circle cx="60" cy="60" r="52" fill="none" stroke="#64c8e6" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="327" stroke-dashoffset="203"/>
+                </svg>
+                <span>38</span>
+              </div>
+              <div>
+                <h2>正在 <b>解析</b> 观察资料</h2>
+                <p>OCR 与结构化抽取 · 第 12 / 30 份 · Remote_A1P260307357_线上截图 (6).jpg</p>
+              </div>
+            </div>
+            <div class="metrics-flow">
+              <div class="metric-pod"><label>资料</label><b>30</b></div>
+              <div class="metric-pod"><label>Finding</label><b>0</b></div>
+              <div class="metric-pod"><label>交付物</label><b>0</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Scene 2: Laminar horizontal bands -->
+  <section class="scene s2" id="s2">
+    <div class="wrap">
+      <div class="brand-row">
+        <span>AuditAgent</span>
+        <h2>层流带布局 · 信息沿曲面逐层展开</h2>
+      </div>
+      <div class="band"><label>01 · 准备</label><div class="txt">案件已创建</div></div>
+      <div class="band"><label>02 · 接入</label><div class="txt">30 份资料已入库</div></div>
+      <div class="band main">
+        <label>03 · 分析 · 运行中</label>
+        <h3>解析文档 <strong>38%</strong></h3>
+        <p>层流式进度：每一层带子是同一股气流的不同截面，而不是左侧方块 + 右侧方块。</p>
+        <div class="flow-bar"><i></i></div>
+        <div class="band-row">
+          <span>资料<b>30</b></span>
+          <span>Finding<b>0</b></span>
+          <span>交付<b>0</b></span>
+        </div>
+      </div>
+      <div class="band"><label>04 · 交付</label><div class="txt">待分析完成</div></div>
+    </div>
+  </section>
+
+  <!-- Scene 3: Airfoil cross-section card -->
+  <section class="scene s3" id="s3">
+    <div class="airfoil-card">
+      <svg class="airfoil-svg" viewBox="0 0 800 280" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="af-bg" x1="0%" y1="50%" x2="100%" y2="50%">
+            <stop offset="0%" stop-color="rgba(12,24,40,0.95)"/>
+            <stop offset="38%" stop-color="rgba(100,200,230,0.12)"/>
+            <stop offset="100%" stop-color="rgba(12,24,40,0.9)"/>
+          </linearGradient>
+          <linearGradient id="af-fill" x1="0%" y1="50%" x2="100%" y2="50%">
+            <stop offset="0%" stop-color="rgba(58,122,148,0.5)"/>
+            <stop offset="100%" stop-color="rgba(100,200,230,0.25)"/>
+          </linearGradient>
+          <clipPath id="af-clip">
+            <path d="M20 140 C20 40 120 20 400 18 C680 20 780 40 780 140 C780 240 680 260 400 262 C120 260 20 240 20 140 Z"/>
+          </clipPath>
+        </defs>
+        <!-- 翼型外轮廓 -->
+        <path d="M20 140 C20 40 120 20 400 18 C680 20 780 40 780 140 C780 240 680 260 400 262 C120 260 20 240 20 140 Z"
+          fill="url(#af-bg)" stroke="rgba(100,200,230,0.25)" stroke-width="1.5"/>
+        <!-- 38% 填充区 — 进度即翼型内部形态 -->
+        <path d="M20 140 C20 40 120 20 304 18 C304 18 304 262 120 260 C20 240 20 140 20 140 Z"
+          fill="url(#af-fill)"/>
+        <!-- 内部流线 -->
+        <g clip-path="url(#af-clip)" opacity="0.4">
+          <path d="M40 100 Q200 90 400 95 T760 92" fill="none" stroke="rgba(100,200,230,0.3)" stroke-width="0.75"/>
+          <path d="M40 140 Q200 130 400 135 T760 132" fill="none" stroke="rgba(100,200,230,0.5)" stroke-width="1"/>
+          <path d="M40 180 Q200 170 400 175 T760 172" fill="none" stroke="rgba(100,200,230,0.3)" stroke-width="0.75"/>
+        </g>
+      </svg>
+      <div class="airfoil-content">
+        <div class="meta">PARSE · STEP 05 · 38%</div>
+        <h2>解析文档 · <em>运行中</em></h2>
+        <div class="file">Remote_A1P260307357_20260506_线上截图 (6).jpg</div>
+        <div class="stats">
+          <div><label>资料</label><b>30</b></div>
+          <div><label>Finding</label><b>0</b></div>
+          <div><label>交付物</label><b>0</b></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    document.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("on"));
+        document.querySelectorAll(".scene").forEach((s) => s.classList.remove("on"));
+        btn.classList.add("on");
+        document.getElementById(btn.dataset.scene).classList.add("on");
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -13,6 +14,17 @@ AGENT_REQUIRED_MSG = (
     "请在 backend/.env 设置 LLM_API_KEY（DeepSeek）与 ENABLE_LLM=true。"
 )
 
+LLM_RETRY_MAX = 3
+LLM_RETRY_BASE_SEC = 1.0
+
+_DOMAIN_SYSTEM_PROMPTS = {
+    "accounting": "你是会计风险评估 Agent 的推理模块。只输出合法 JSON 对象，不要 markdown 代码块。",
+    "compliance": (
+        "你是会议合规观察（remote observation）Agent 的推理模块。"
+        "只输出合法 JSON 对象，不要 markdown 代码块。"
+    ),
+}
+
 
 def llm_available() -> bool:
     return bool(settings.enable_llm and settings.text_api_key)
@@ -23,6 +35,10 @@ def require_agent_llm() -> None:
         raise FXPGError("ENABLE_LLM 未启用，智能体无法运行", code="AGENT_DISABLED", status=503)
     if not settings.text_api_key:
         raise FXPGError(AGENT_REQUIRED_MSG, code="AGENT_LLM_REQUIRED", status=503)
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code >= 500 or status_code in (408, 429)
 
 
 def chat_completion(
@@ -45,21 +61,45 @@ def chat_completion(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = tool_choice or "auto"
-    try:
-        with httpx.Client(timeout=90.0) as client:
-            resp = client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]
-    except httpx.HTTPError as exc:
-        raise FXPGError(f"文本 LLM 调用失败: {exc}", code="AGENT_LLM_FAILED", status=502) from exc
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, LLM_RETRY_MAX + 1):
+        try:
+            with httpx.Client(timeout=90.0) as client:
+                resp = client.post(url, headers=headers, json=payload)
+                if resp.status_code >= 400 and _is_retryable_status(resp.status_code) and attempt < LLM_RETRY_MAX:
+                    last_exc = httpx.HTTPStatusError(
+                        f"server error {resp.status_code}", request=resp.request, response=resp
+                    )
+                    time.sleep(LLM_RETRY_BASE_SEC * (2 ** (attempt - 1)))
+                    continue
+                resp.raise_for_status()
+                return resp.json()["choices"][0]["message"]
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            if attempt >= LLM_RETRY_MAX:
+                break
+            time.sleep(LLM_RETRY_BASE_SEC * (2 ** (attempt - 1)))
+            continue
+        except httpx.HTTPError as exc:
+            raise FXPGError(f"文本 LLM 调用失败: {exc}", code="AGENT_LLM_FAILED", status=502) from exc
+
+    raise FXPGError(
+        f"文本 LLM 调用失败（已重试 {LLM_RETRY_MAX} 次）: {last_exc}",
+        code="AGENT_LLM_FAILED",
+        status=502,
+    ) from last_exc
 
 
-def chat_json(messages: List[Dict[str, str]], schema_hint: str = "") -> Dict[str, Any]:
+def chat_json(
+    messages: List[Dict[str, str]],
+    schema_hint: str = "",
+    domain: Optional[str] = None,
+) -> Dict[str, Any]:
     require_agent_llm()
-    sys = (
-        "你是会计风险评估 Agent 的推理模块。只输出合法 JSON 对象，不要 markdown 代码块。"
-        + (f" 格式要求：{schema_hint}" if schema_hint else "")
-    )
+    active_domain = (domain or settings.agent_domain or "accounting").lower()
+    base_prompt = _DOMAIN_SYSTEM_PROMPTS.get(active_domain, _DOMAIN_SYSTEM_PROMPTS["accounting"])
+    sys = base_prompt + (f" 格式要求：{schema_hint}" if schema_hint else "")
     msgs = [{"role": "system", "content": sys}] + messages
     msg = chat_completion(msgs, temperature=0.1)
     text = (msg.get("content") or "").strip()

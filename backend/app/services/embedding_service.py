@@ -17,16 +17,24 @@ def embedding_dim() -> int:
 
 
 def embed_text(text: str) -> List[float]:
-    """生成文本向量。有 OpenAI Key 时用 API，否则用本地哈希向量（开发/离线可用）。"""
+    """生成文本向量。OpenAI 兼容 embeddings 可用时用 API，否则本地哈希向量。"""
     text = (text or "").strip()
     if not text:
         return [0.0] * _EMBED_DIM
-    if settings.text_api_key:
+    if settings.text_api_key and _remote_embedding_supported():
         try:
             return _openai_embed(text)
         except Exception:
             pass
     return _local_embed(text)
+
+
+def _remote_embedding_supported() -> bool:
+    """DeepSeek 等 chat 端点不提供 /embeddings，启动时直接走本地向量。"""
+    base = settings.text_base_url.lower()
+    if "deepseek.com" in base:
+        return False
+    return True
 
 
 def _openai_embed(text: str) -> List[float]:

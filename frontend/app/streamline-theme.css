@@ -1,0 +1,396 @@
+/**
+ * Streamline Tech — 流线型科技视觉
+ * 覆盖 globals.css 中的赛博装饰（切角、扫描线、霓虹闪烁）
+ */
+
+:root,
+[data-theme="dark"] {
+  --cyber-bg: #070b12;
+  --cyber-panel: rgba(12, 18, 28, 0.78);
+  --cyber-panel-2: rgba(16, 24, 38, 0.65);
+  --cyber-line: rgba(148, 176, 210, 0.1);
+  --cyber-line-bright: rgba(148, 176, 210, 0.22);
+
+  --neon: #4db8d9;
+  --neon-dim: rgba(77, 184, 217, 0.08);
+  --neon-glow: rgba(77, 184, 217, 0.22);
+  --accent: #4db8d9;
+  --purple: #6b8fd4;
+  --purple-glow: rgba(107, 143, 212, 0.15);
+  --magenta: #d4738a;
+  --magenta-dim: rgba(212, 115, 138, 0.1);
+
+  --text: #e8eef4;
+  --text-2: #94a3b8;
+  --text-3: #64748b;
+
+  --flow-gradient: linear-gradient(135deg, rgba(77, 184, 217, 0.06) 0%, transparent 42%, rgba(107, 143, 212, 0.04) 100%);
+  --panel-shadow: 0 4px 32px rgba(2, 8, 20, 0.45), 0 0 0 1px rgba(148, 176, 210, 0.08);
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+  --ease-flow: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme="light"] {
+  --cyber-bg: #eef2f7;
+  --cyber-panel: rgba(255, 255, 255, 0.92);
+  --cyber-panel-2: rgba(248, 250, 252, 0.95);
+  --cyber-line: rgba(15, 40, 70, 0.08);
+  --cyber-line-bright: rgba(15, 40, 70, 0.14);
+
+  --neon: #1565a8;
+  --neon-dim: rgba(21, 101, 168, 0.07);
+  --neon-glow: rgba(21, 101, 168, 0.14);
+  --accent: #1565a8;
+  --purple: #3d5a9e;
+  --purple-glow: rgba(61, 90, 158, 0.1);
+
+  --text: #0f172a;
+  --text-2: #475569;
+  --text-3: #64748b;
+
+  --flow-gradient: linear-gradient(135deg, rgba(21, 101, 168, 0.04) 0%, transparent 50%);
+  --panel-shadow: 0 4px 24px rgba(15, 40, 70, 0.06), 0 0 0 1px rgba(15, 40, 70, 0.06);
+}
+
+/* 去掉 CRT 扫描线 */
+body::after {
+  display: none !important;
+}
+
+body {
+  font-family: var(--font);
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: color var(--ease-flow);
+}
+a:hover {
+  color: var(--text);
+  text-shadow: none;
+}
+
+/* ── 流线面板 ── */
+.fx-panel {
+  margin-bottom: 1.25rem;
+  background: var(--cyber-panel);
+  backdrop-filter: blur(16px);
+  border-radius: var(--radius-lg);
+  clip-path: none;
+  box-shadow: var(--panel-shadow);
+  overflow: hidden;
+}
+.fx-panel::before {
+  display: none;
+}
+.fx-panel--glow {
+  box-shadow:
+    var(--panel-shadow),
+    0 0 48px rgba(77, 184, 217, 0.06);
+}
+.fx-panel__corner {
+  display: none;
+}
+.fx-panel__inner {
+  padding: 1.25rem 1.35rem;
+  background: var(--flow-gradient);
+}
+
+/* ── 侧栏 ── */
+.shell-side {
+  background: rgba(8, 12, 20, 0.88);
+  backdrop-filter: blur(20px);
+  border-right: 1px solid var(--cyber-line);
+  box-shadow: 4px 0 40px rgba(0, 0, 0, 0.25);
+}
+[data-theme="light"] .shell-side {
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 4px 0 32px rgba(15, 40, 70, 0.04);
+}
+
+.shell-brand {
+  padding: 1.25rem 1.15rem;
+  border-bottom: 1px solid var(--cyber-line);
+}
+.shell-brand__mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(77, 184, 217, 0.15), rgba(107, 143, 212, 0.08));
+  border: 1px solid rgba(77, 184, 217, 0.35);
+  font-family: var(--font);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--accent);
+}
+.shell-brand__pulse {
+  display: none;
+}
+.shell-brand__text {
+  font-family: var(--font);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-transform: none;
+}
+.shell-brand__mark {
+  display: grid;
+  place-items: center;
+}
+.shell-brand__text small {
+  display: block;
+}
+
+.shell-nav__item {
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  letter-spacing: 0;
+  text-transform: none;
+  border-radius: var(--radius-sm);
+  border-left: 2px solid transparent;
+  padding-left: 0.75rem;
+}
+.shell-nav__item.is-active {
+  border-left-color: var(--accent);
+  background: var(--neon-dim);
+  box-shadow: none;
+}
+
+/* ── 背景：流线网格 ── */
+.tech-backdrop__grid {
+  background:
+    linear-gradient(105deg, transparent 0%, rgba(77, 184, 217, 0.03) 45%, transparent 70%),
+    linear-gradient(rgba(148, 176, 210, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 176, 210, 0.04) 1px, transparent 1px);
+  background-size: 100% 100%, 64px 64px, 64px 64px;
+  mask-image: radial-gradient(ellipse 90% 80% at 60% 20%, #000 15%, transparent 72%);
+}
+.tech-backdrop__flow {
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+}
+.tech-backdrop__flow svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Agent 核心：流线环 ── */
+.agent-core__hex {
+  clip-path: none;
+  border-radius: 50%;
+  inset: 16px;
+  background: radial-gradient(circle at 35% 30%, rgba(77, 184, 217, 0.2), rgba(77, 184, 217, 0.04));
+  box-shadow: inset 0 0 0 1px rgba(77, 184, 217, 0.25);
+}
+.agent-core__ring-bg {
+  stroke: rgba(148, 176, 210, 0.15);
+  stroke-width: 2.5;
+}
+.agent-core__ring-fill {
+  stroke: url(#streamline-ring-gradient);
+  stroke-width: 2.5;
+  filter: none;
+}
+.agent-core__core {
+  width: 10px;
+  height: 10px;
+  box-shadow: 0 0 12px rgba(77, 184, 217, 0.4);
+}
+.agent-core__pulse {
+  display: none;
+}
+.agent-core__sweep {
+  opacity: 0.35;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(77, 184, 217, 0.15) 50deg, transparent 100deg);
+}
+
+/* ── 运行 HUD ── */
+.mission-strip {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--cyber-line);
+  background: var(--cyber-panel);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--panel-shadow);
+}
+.mission-strip--live {
+  border-color: rgba(77, 184, 217, 0.28);
+  box-shadow: var(--panel-shadow), inset 0 1px 0 rgba(77, 184, 217, 0.08);
+}
+.mission-strip__bar span {
+  background: linear-gradient(90deg, var(--accent), #6b8fd4);
+  border-radius: var(--radius-pill);
+}
+
+.cyber-flow.fx-panel .fx-panel__inner {
+  padding: 1.35rem;
+}
+.cyber-flow__noise {
+  display: none;
+}
+.cyber-flow::before {
+  display: none;
+}
+.cyber-flow--live {
+  border: none;
+  box-shadow: var(--panel-shadow);
+}
+
+.cyber-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--text-3);
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--cyber-line);
+  background: rgba(148, 176, 210, 0.06);
+}
+
+.cyber-flow__track-bg {
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: rgba(148, 176, 210, 0.12);
+}
+.cyber-flow__track-fill {
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--accent), #6b8fd4);
+  box-shadow: 0 0 12px rgba(77, 184, 217, 0.25);
+}
+.cyber-flow__track-fill::after {
+  display: none;
+}
+
+.cyber-node {
+  border-radius: var(--radius-md) !important;
+  clip-path: none !important;
+}
+.cyber-node--active {
+  box-shadow: 0 0 20px rgba(77, 184, 217, 0.15) !important;
+}
+
+.mission__scanline,
+.mission::after {
+  display: none !important;
+}
+.mission-phase__burst,
+.mission-phase__ring {
+  display: none !important;
+}
+.mission-phase__node {
+  border-radius: 50% !important;
+  clip-path: none !important;
+}
+.mission-phase--active .mission-phase__label {
+  text-shadow: none !important;
+}
+.mission-stat--pct em {
+  text-shadow: none !important;
+}
+
+.pipeline-hud--live {
+  border: none;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  padding: 0;
+}
+
+/* ── 按钮与表单 ── */
+.btn {
+  border-radius: var(--radius-sm);
+  font-family: var(--font);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  transition: all var(--ease-flow);
+}
+.btn-outline {
+  border-color: var(--cyber-line-bright);
+  background: transparent;
+}
+.btn-outline:hover {
+  border-color: var(--accent);
+  background: var(--neon-dim);
+  box-shadow: none;
+}
+
+.input {
+  border-radius: var(--radius-sm);
+  border-color: var(--cyber-line-bright);
+  background: var(--cyber-panel-2);
+  transition: border-color var(--ease-flow), box-shadow var(--ease-flow);
+}
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(77, 184, 217, 0.12);
+}
+
+.block {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--cyber-line);
+  background: var(--cyber-panel);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--panel-shadow);
+}
+
+.page-top h1 {
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  font-size: 1.5rem;
+}
+.page-top p {
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+.rail-crumb {
+  font-size: 0.75rem;
+}
+.rail-live {
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.rail-pages__link {
+  border-radius: var(--radius-sm);
+  border-left: 2px solid transparent;
+  font-size: 0.8125rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.rail-pages__link.is-active {
+  border-left-color: var(--accent);
+  background: var(--neon-dim);
+}
+
+.telemetry-panel {
+  border-radius: var(--radius-lg);
+}
+.telemetry-tile__value {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.prefs-bar__btn {
+  border-radius: var(--radius-sm);
+  font-family: var(--font);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-core__sweep,
+  .tech-backdrop__flow path {
+    animation: none !important;
+  }
+}

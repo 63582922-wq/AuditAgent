@@ -36,12 +36,22 @@ from app.services.entity_extractor import extract_entities_from_documents
 from app.services.parsers.excel_parser import annotate_excel, parse_excel
 from app.services.parsers.image_parser import annotate_image, parse_image
 from app.services.parsers.pdf_parser import extract_contract_fields, parse_pdf
+from app.services.parsers.pdf_ingest_splitter import ingest_pdf_hybrid
+from app.services.parsers.parsed_doc_entries import flatten_parsed_docs
 from app.services.parsers.word_parser import parse_word
+from app.services.outputs.compliance_deliverables import (
+    build_compliance_deliverable_bundle,
+    generate_generic_correction_excel,
+    generate_generic_missing_excel,
+)
+from app.services.outputs.material_layout_deliverables import collect_parsed_materials
 from app.services.outputs.excel_report import generate_risk_excel
 from app.services.outputs.pdf_report import generate_pdf_report
+from app.services.domain.registry import get_domain_pack
 from app.services.record_linker import build_record_links, links_to_cross_risks
 from app.services.risk_scorer import calculate_risk_score
 from app.services.rule_engine import run_rules_on_fields, run_rules_on_rows
+from app.services.agent.meeting_scope import scoped_delete, scoped_query
 
 CROSS_RISK_PREFIXES = ("AMT-", "INV-", "CROSS-", "3WAY-", "LINK-", "ANOM-")
 
@@ -55,6 +65,7 @@ def _is_cross_derived_risk(rule_triggered: str | None) -> bool:
 STEP_PROGRESS = {
     "planning": 5,
     "classifying": 10,
+    "vision_parsing": 18,
     "parsing": 25,
     "extracting": 40,
     "running_rules": 55,
@@ -83,6 +94,7 @@ class AgentWorkflow:
     STEPS = [
         "planning",
         "classifying",
+        "vision_parsing",
         "parsing",
         "extracting",
         "running_rules",
@@ -97,21 +109,26 @@ class AgentWorkflow:
         db: Session,
         project_id: str,
         progress_callback: Optional[Callable[[str, int], None]] = None,
+        meeting_id: Optional[str] = None,
     ):
         self.db = db
         self.project_id = project_id
+        self.meeting_id = meeting_id
         self.progress_callback = progress_callback
+
+    def _q(self, model):
+        return scoped_query(self.db, model, self.project_id, self.meeting_id)
 
     def run(self) -> None:
         project = self.db.get(Project, self.project_id)
         if not project:
             raise ValueError("project not found")
 
-        trace = AgentTrace(self.db, self.project_id)
+        trace = AgentTrace(self.db, self.project_id, self.meeting_id)
 
         try:
             require_agent_llm()
-            files = self.db.query(FileRecord).filter_by(project_id=self.project_id).all()
+            files = self._q(FileRecord).all()
 
             with trace.timed_step("planning"):
                 agent_plan = plan_analysis(self.db, self.project_id, files)
@@ -123,7 +140,7 @@ class AgentWorkflow:
             if graph.should_run("classifying"):
                 self._set_status(project, "classifying")
                 trace.step("classifying", "running")
-                for f in files:
+                for i, f in enumerate(files):
                     ext = Path(f.file_name).suffix.lower()
                     classification = classify_document(f.file_name, ext)
                     f.file_type = classification["file_type"]
@@ -131,6 +148,8 @@ class AgentWorkflow:
                     f.confidence = classification["confidence"]
                     f.meta_json = classification
                     self.db.commit()
+                    if len(files) > 0:
+                        self._progress_step_span("classifying", (i + 1) / len(files))
                 trace.step("classifying", "completed", {"file_count": len(files)})
             else:
                 trace.step("classifying", "skipped", {"reason": "plan_steps"})
@@ -140,7 +159,7 @@ class AgentWorkflow:
             if graph.should_run("parsing"):
                 self._set_status(project, "parsing")
                 trace.step("parsing", "running")
-                for f in files:
+                for i, f in enumerate(files):
                     content = self._parse_file(f)
                     headers = []
                     if content.get("sheets"):
@@ -154,6 +173,7 @@ class AgentWorkflow:
                         f.meta_json = reclassify
                     pd = ParsedDocument(
                         project_id=self.project_id,
+                        meeting_id=self.meeting_id,
                         file_id=f.id,
                         document_type=f.document_category,
                         content_json=content,
@@ -168,8 +188,12 @@ class AgentWorkflow:
                             "file_name": f.file_name,
                             "document_category": f.document_category,
                             "content_json": content,
+                            "text_content": content.get("text_content", ""),
                         }
                     )
+                    if len(files) > 0:
+                        self._progress_step_span("parsing", (i + 1) / len(files))
+                parsed_docs = flatten_parsed_docs(parsed_docs)
                 trace.step("parsing", "completed", {"parsed": len(parsed_docs)})
             else:
                 trace.step("parsing", "skipped", {"reason": "plan_steps"})
@@ -183,13 +207,14 @@ class AgentWorkflow:
                 self._set_status(project, "extracting")
                 self._progress("extracting")
                 trace.step("extracting", "running")
-                self.db.query(ExtractedEntity).filter_by(project_id=self.project_id).delete()
-                self.db.query(RecordLink).filter_by(project_id=self.project_id).delete()
+                scoped_delete(self.db, ExtractedEntity, self.project_id, self.meeting_id)
+                scoped_delete(self.db, RecordLink, self.project_id, self.meeting_id)
                 entities = extract_entities_from_documents(self.project_id, parsed_docs)
                 for ent in entities:
                     self.db.add(
                         ExtractedEntity(
                             project_id=ent["project_id"],
+                            meeting_id=self.meeting_id,
                             file_id=ent["file_id"],
                             entity_type=ent["entity_type"],
                             entity_value=ent["entity_value"],
@@ -200,7 +225,7 @@ class AgentWorkflow:
                     )
                 links = build_record_links(self.project_id, entities)
                 for link in links:
-                    self.db.add(RecordLink(**link))
+                    self.db.add(RecordLink(**{**link, "meeting_id": self.meeting_id}))
                 self.db.commit()
                 trace.step(
                     "extracting",
@@ -342,10 +367,11 @@ class AgentWorkflow:
             else:
                 trace.step("adjudicating", "skipped", {"reason": "plan_steps"})
 
-            self.db.query(Risk).filter_by(project_id=self.project_id).delete()
+            scoped_delete(self.db, Risk, self.project_id, self.meeting_id)
             for r in all_risks:
                 risk_obj = Risk(
                     project_id=self.project_id,
+                    meeting_id=self.meeting_id,
                     risk_id=r.get("risk_id") or f"RISK-{uuid.uuid4().hex[:8]}",
                     risk_category=r["risk_category"],
                     risk_subcategory=r.get("risk_subcategory"),
@@ -372,7 +398,9 @@ class AgentWorkflow:
                 self._progress("generating_report")
                 self._generate_outputs(project, missing)
             project.summary = self._build_summary(all_risks, missing)
+            prior = dict(project.state_json or {})
             project.state_json = {
+                **prior,
                 "agent_plan": agent_plan,
                 "execution_graph": graph.to_dict(),
                 "missing_documents": missing,
@@ -395,10 +423,12 @@ class AgentWorkflow:
         """ReAct 外环：LLM 逐步调度内环流水线工具。"""
         from app.services.agent.pipeline_executor import PipelineExecutor
 
-        trace = AgentTrace(self.db, self.project_id)
+        trace = AgentTrace(self.db, self.project_id, self.meeting_id)
         try:
             require_agent_llm()
-            executor = PipelineExecutor(self.db, self.project_id, self.progress_callback, trace)
+            executor = PipelineExecutor(
+                self.db, self.project_id, self.progress_callback, trace, self.meeting_id
+            )
             executor.run_react()
         except Exception as exc:
             project = self.db.get(Project, self.project_id)
@@ -411,9 +441,11 @@ class AgentWorkflow:
         """Orchestrator 外环：主 Agent 拆解任务并委派子 Agent。"""
         from app.services.agent.orchestrator import MissionOrchestrator
 
-        trace = AgentTrace(self.db, self.project_id)
+        trace = AgentTrace(self.db, self.project_id, self.meeting_id)
         try:
-            MissionOrchestrator(self.db, self.project_id, self.progress_callback, trace).run()
+            MissionOrchestrator(
+                self.db, self.project_id, self.progress_callback, trace, self.meeting_id
+            ).run()
         except Exception as exc:
             project = self.db.get(Project, self.project_id)
             if project:
@@ -435,12 +467,12 @@ class AgentWorkflow:
         if not agent_plan:
             raise ValueError("缺少 agent_plan，请先完成全量分析")
 
-        trace = AgentTrace(self.db, self.project_id)
+        trace = AgentTrace(self.db, self.project_id, self.meeting_id)
         trace.step("runtime", "running", {"scope": scope, "kind": "partial_rerun"})
 
         try:
             require_agent_llm()
-            files = self.db.query(FileRecord).filter_by(project_id=self.project_id).all()
+            files = self._q(FileRecord).all()
             graph = ExecutionGraph.from_plan(agent_plan, files)
             parsed_docs = self._load_parsed_docs_from_db()
             links = self._load_links_from_db()
@@ -453,7 +485,7 @@ class AgentWorkflow:
             else:
                 base_risks = [
                     self._risk_orm_to_dict(r)
-                    for r in self.db.query(Risk).filter_by(project_id=self.project_id).all()
+                    for r in self._q(Risk).all()
                     if not _is_cross_derived_risk(r.rule_triggered)
                 ]
                 invoice_rows, expense_rows = self._collect_invoice_expense_rows(parsed_docs)
@@ -511,7 +543,7 @@ class AgentWorkflow:
         if not base_plan:
             raise ValueError("缺少历史 agent_plan，请先完成全量分析")
 
-        files = self.db.query(FileRecord).filter_by(project_id=self.project_id).all()
+        files = self._q(FileRecord).all()
         diff = diff_uploaded_files(state, files)
         if not diff.new_file_ids:
             raise ValueError("没有检测到新增资料")
@@ -521,7 +553,7 @@ class AgentWorkflow:
             files,
         )
         graph = ExecutionGraph.from_plan(agent_plan, files)
-        trace = AgentTrace(self.db, self.project_id)
+        trace = AgentTrace(self.db, self.project_id, self.meeting_id)
         trace.plan(agent_plan, graph.to_dict())
         trace.step("runtime", "running", {"scope": "incremental", "new_files": len(diff.new_file_ids)})
 
@@ -531,7 +563,7 @@ class AgentWorkflow:
 
             if graph.should_run("classifying"):
                 self._set_status(project, "classifying")
-                for f in new_files:
+                for i, f in enumerate(new_files):
                     ext = Path(f.file_name).suffix.lower()
                     classification = classify_document(f.file_name, ext)
                     f.file_type = classification["file_type"]
@@ -539,12 +571,14 @@ class AgentWorkflow:
                     f.confidence = classification["confidence"]
                     f.meta_json = classification
                     self.db.commit()
+                    if len(new_files) > 0:
+                        self._progress_step_span("classifying", (i + 1) / len(new_files))
 
             parsed_docs = self._load_parsed_docs_from_db()
 
             if graph.should_run("parsing"):
                 self._set_status(project, "parsing")
-                for f in new_files:
+                for i, f in enumerate(new_files):
                     content = self._parse_file(f)
                     headers = []
                     if content.get("sheets"):
@@ -558,6 +592,7 @@ class AgentWorkflow:
                         f.meta_json = reclassify
                     pd = ParsedDocument(
                         project_id=self.project_id,
+                        meeting_id=self.meeting_id,
                         file_id=f.id,
                         document_type=f.document_category,
                         content_json=content,
@@ -566,6 +601,8 @@ class AgentWorkflow:
                     self.db.merge(pd)
                     f.parse_status = "done"
                     self.db.commit()
+                    if len(new_files) > 0:
+                        self._progress_step_span("parsing", (i + 1) / len(new_files))
                 parsed_docs = self._load_parsed_docs_from_db()
 
             graph = ExecutionGraph.from_plan(agent_plan, files)
@@ -578,13 +615,14 @@ class AgentWorkflow:
             if graph.should_run("extracting") and parsed_docs:
                 self._set_status(project, "extracting")
                 self._progress("extracting")
-                self.db.query(ExtractedEntity).filter_by(project_id=self.project_id).delete()
-                self.db.query(RecordLink).filter_by(project_id=self.project_id).delete()
+                scoped_delete(self.db, ExtractedEntity, self.project_id, self.meeting_id)
+                scoped_delete(self.db, RecordLink, self.project_id, self.meeting_id)
                 entities = extract_entities_from_documents(self.project_id, parsed_docs)
                 for ent in entities:
                     self.db.add(
                         ExtractedEntity(
                             project_id=ent["project_id"],
+                            meeting_id=self.meeting_id,
                             file_id=ent["file_id"],
                             entity_type=ent["entity_type"],
                             entity_value=ent["entity_value"],
@@ -595,7 +633,7 @@ class AgentWorkflow:
                     )
                 links = build_record_links(self.project_id, entities)
                 for link in links:
-                    self.db.add(RecordLink(**link))
+                    self.db.add(RecordLink(**{**link, "meeting_id": self.meeting_id}))
                 self.db.commit()
 
             if graph.should_run("running_rules") and parsed_docs:
@@ -732,7 +770,8 @@ class AgentWorkflow:
 
     def _load_parsed_docs_from_db(self) -> list[dict]:
         docs = []
-        for pd in self.db.query(ParsedDocument).filter_by(project_id=self.project_id).all():
+        q = self._q(ParsedDocument)
+        for pd in q.all():
             f = self.db.get(FileRecord, pd.file_id)
             if not f:
                 continue
@@ -742,9 +781,10 @@ class AgentWorkflow:
                     "file_name": f.file_name,
                     "document_category": f.document_category,
                     "content_json": pd.content_json,
+                    "text_content": pd.text_content or "",
                 }
             )
-        return docs
+        return flatten_parsed_docs(docs)
 
     def _load_links_from_db(self) -> list[dict]:
         return [
@@ -757,7 +797,7 @@ class AgentWorkflow:
                 "confidence": l.confidence,
                 "match_method": l.match_method,
             }
-            for l in self.db.query(RecordLink).filter_by(project_id=self.project_id).all()
+            for l in self._q(RecordLink).all()
         ]
 
     def _risk_orm_to_dict(self, r: Risk) -> dict:
@@ -781,7 +821,7 @@ class AgentWorkflow:
         }
 
     def _risks_from_db(self) -> list[dict]:
-        return [self._risk_orm_to_dict(r) for r in self.db.query(Risk).filter_by(project_id=self.project_id).all()]
+        return [self._risk_orm_to_dict(r) for r in self._q(Risk).all()]
 
     def _collect_invoice_expense_rows(self, parsed_docs: list[dict]) -> tuple[list[dict], list[dict]]:
         invoice_rows: list[dict] = []
@@ -815,11 +855,12 @@ class AgentWorkflow:
         return invoice_rows, expense_rows
 
     def _persist_risks(self, all_risks: list[dict]) -> None:
-        self.db.query(Risk).filter_by(project_id=self.project_id).delete()
+        scoped_delete(self.db, Risk, self.project_id, self.meeting_id)
         for r in all_risks:
             self.db.add(
                 Risk(
                     project_id=self.project_id,
+                    meeting_id=self.meeting_id,
                     risk_id=r.get("risk_id") or f"RISK-{uuid.uuid4().hex[:8]}",
                     risk_category=r["risk_category"],
                     risk_subcategory=r.get("risk_subcategory"),
@@ -846,7 +887,15 @@ class AgentWorkflow:
         if f.file_type == "excel" or path.suffix.lower() in (".xlsx", ".xls", ".csv"):
             return parse_excel(path)
         if f.file_type == "pdf" or path.suffix.lower() == ".pdf":
-            content = parse_pdf(path)
+            project = self.db.get(Project, self.project_id)
+            pack = get_domain_pack(project)
+            result = ingest_pdf_hybrid(
+                path,
+                f.document_category or "unknown",
+                f.file_name,
+                domain=pack.name,
+            )
+            content = result.to_content_json()
             if "contract" in f.document_category or "合同" in f.file_name:
                 content["fields"] = extract_contract_fields(content)
                 f.document_category = "contract"
@@ -856,6 +905,11 @@ class AgentWorkflow:
             f.document_category = "contract"
             return content
         if f.file_type == "image" or path.suffix.lower() in (".jpg", ".jpeg", ".png"):
+            project = self.db.get(Project, self.project_id)
+            if get_domain_pack(project).name == "compliance":
+                from app.services.domain.compliance.compliance_vision import analyze_compliance_image
+
+                return analyze_compliance_image(path, f.document_category or "unknown", f.file_name)
             return parse_image(path)
         return {"file_type": "unknown", "text_content": ""}
 
@@ -915,12 +969,10 @@ class AgentWorkflow:
         }
 
     def _generate_outputs(self, project: Project, missing: list[dict]) -> None:
-        risks = (
-            self.db.query(Risk)
-            .filter_by(project_id=self.project_id)
-            .filter(Risk.status != "dismissed")
-            .all()
-        )
+        rq = self._q(Risk).filter(Risk.status != "dismissed")
+        if self.meeting_id:
+            rq = rq.filter_by(meeting_id=self.meeting_id)
+        risks = rq.all()
         risk_dicts = [
             {
                 "risk_id": r.risk_id,
@@ -934,23 +986,77 @@ class AgentWorkflow:
                 "rule_triggered": r.rule_triggered,
                 "manual_review_required": r.manual_review_required,
                 "status": r.status,
+                "source_file_id": r.source_file_id,
                 "source_location_json": r.source_location_json,
+                "correction_action": r.correction_action,
             }
             for r in risks
         ]
 
         out_dir = settings.storage_path / "outputs" / self.project_id
+        if self.meeting_id:
+            out_dir = out_dir / self.meeting_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        excel_path = out_dir / "风险清单.xlsx"
-        generate_risk_excel(risk_dicts, excel_path)
-        self._save_output(project, "risk_excel", excel_path)
+        from app.models import Meeting
 
-        pdf_path = out_dir / "风险评估报告.pdf"
-        generate_pdf_report(project.name, risk_dicts, missing, pdf_path)
-        self._save_output(project, "risk_pdf", pdf_path)
+        meeting = self.db.get(Meeting, self.meeting_id) if self.meeting_id else None
+        state = dict((meeting.state_json if meeting else project.state_json) or {})
+        domain = state.get("agent_domain") or settings.agent_domain
+        is_compliance = domain == "compliance"
+        files_q = self._q(FileRecord)
+        if self.meeting_id:
+            files_q = files_q.filter_by(meeting_id=self.meeting_id)
+        files = files_q.all()
+        file_names = {f.id: f.file_name for f in files}
+        present = state.get("present_categories") or {
+            f.document_category for f in files if f.document_category and f.document_category != "unknown"
+        }
+        pack = get_domain_pack(project)
+        if is_compliance and pack.name == "compliance":
+            missing = [
+                {"document_type": doc_type, "importance": importance, "reason": reason}
+                for doc_type, importance, reason in pack.required_docs
+                if doc_type not in present
+            ]
 
-        files = self.db.query(FileRecord).filter_by(project_id=self.project_id).all()
+        if is_compliance:
+            meeting_case = state.get("meeting_case") or {}
+            parsed_materials = collect_parsed_materials(self.db, self.project_id, self.meeting_id)
+            bundle = build_compliance_deliverable_bundle(
+                out_dir,
+                project.name,
+                risk_dicts,
+                missing,
+                meeting_case=meeting_case,
+                runtime=state.get("runtime"),
+                file_names=file_names,
+                parsed_materials=parsed_materials,
+            )
+            type_aliases = {
+                "finding_pdf": ["finding_pdf", "risk_pdf"],
+                "finding_excel": ["finding_excel", "risk_excel"],
+            }
+            for otype, path in bundle.items():
+                if otype == "deliverable_readme":
+                    self._save_output(project, "deliverable_readme", path)
+                    continue
+                aliases = type_aliases.get(otype, [otype])
+                for alias in aliases:
+                    self._save_output(project, alias, path)
+        else:
+            excel_path = out_dir / "风险清单.xlsx"
+            generate_risk_excel(risk_dicts, excel_path)
+            self._save_output(project, "risk_excel", excel_path)
+            pdf_path = out_dir / "风险评估报告.pdf"
+            generate_pdf_report(project.name, risk_dicts, missing, pdf_path)
+            self._save_output(project, "risk_pdf", pdf_path)
+            missing_path = out_dir / "缺件清单.xlsx"
+            generate_generic_missing_excel(missing, missing_path)
+            self._save_output(project, "missing_docs", missing_path)
+            correction_path = out_dir / "整改建议清单.xlsx"
+            generate_generic_correction_excel(risk_dicts, correction_path)
+            self._save_output(project, "correction_list", correction_path)
         for f in files:
             if f.file_type != "excel":
                 continue
@@ -970,22 +1076,31 @@ class AgentWorkflow:
                 annotate_image(Path(f.storage_path), anns, ann_path)
                 self._save_output(project, "annotated_image", ann_path)
 
-        suggestions_path = out_dir / "更正建议清单.json"
-        suggestions_path.write_text(
-            json.dumps([r.suggestion for r in risks], ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        self._save_output(project, "correction_list", suggestions_path)
+        st = dict(project.state_json or {})
+        st["missing_documents"] = missing
+        if is_compliance:
+            st["present_categories"] = sorted(present)
+        project.state_json = st
+        project.summary = self._build_summary(risk_dicts, missing)
+        self.db.commit()
 
-        missing_path = out_dir / "补充资料清单.json"
-        missing_path.write_text(json.dumps(missing, ensure_ascii=False, indent=2), encoding="utf-8")
-        self._save_output(project, "missing_docs", missing_path)
+        # 清理历史 JSON 交付物（已不再对外提供）
+        for stale in out_dir.glob("*.json"):
+            if stale.name in ("补充资料清单.json", "更正建议清单.json"):
+                stale.unlink(missing_ok=True)
+        oq = self._q(Output).filter(Output.file_name.like("%.json"))
+        oq.delete(synchronize_session=False)
+        self.db.commit()
 
     def _save_output(self, project: Project, output_type: str, path: Path) -> None:
-        self.db.query(Output).filter_by(project_id=project.id, output_type=output_type).delete()
+        dq = self.db.query(Output).filter_by(project_id=project.id, output_type=output_type)
+        if self.meeting_id:
+            dq = dq.filter_by(meeting_id=self.meeting_id)
+        dq.delete(synchronize_session=False)
         self.db.add(
             Output(
                 project_id=project.id,
+                meeting_id=self.meeting_id,
                 output_type=output_type,
                 file_name=path.name,
                 storage_path=str(path),
@@ -1010,11 +1125,26 @@ class AgentWorkflow:
         if self.progress_callback:
             self.progress_callback(step, pct)
 
+    def _progress_step_span(self, step: str, fraction: float) -> None:
+        """步骤内细粒度进度（如逐文件解析）。"""
+        if not self.progress_callback:
+            return
+        base = STEP_PROGRESS.get(step, 0)
+        step_keys = [s for s in self.STEPS if s in STEP_PROGRESS]
+        try:
+            idx = step_keys.index(step)
+            nxt = STEP_PROGRESS[step_keys[idx + 1]] if idx + 1 < len(step_keys) else 100
+        except ValueError:
+            nxt = min(100, base + 15)
+        pct = int(base + (nxt - base) * max(0.0, min(1.0, fraction)))
+        self.progress_callback(step, pct)
+
     def _log(self, step: str, status: str, detail: dict | None = None) -> None:
         started = time.time()
         self.db.add(
             AgentRunLog(
                 project_id=self.project_id,
+                meeting_id=self.meeting_id,
                 step=step,
                 status=status,
                 detail_json=detail,

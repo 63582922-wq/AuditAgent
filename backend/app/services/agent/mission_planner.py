@@ -12,14 +12,19 @@ from app.services.agent.llm_client import chat_json, require_agent_llm
 from app.services.agent.planner import plan_analysis
 from app.services.agent.skill_registry import list_registered_agents, load_skill
 from app.services.agent.sub_agents import route_sub_agents
+from app.services.agent.modality_router import VISION_AGENT_ID, split_files_by_modality, TEXT_INGEST_AGENT_ID
+from app.services.domain.registry import get_domain_pack
 
-INGEST_STEPS = ["classifying", "parsing", "extracting"]
+INGEST_TEXT_STEPS = ["parsing", "extracting"]
+VISION_STEPS = ["vision_parsing"]
 RULES_STEPS = ["running_rules"]
 CROSS_STEPS = ["cross_checking"]
 SYNTHESIS_STEPS = ["adjudicating", "generating_report"]
 
 RULES_AGENTS = ("invoice", "tax", "ledger")
 CROSS_AGENTS = ("treasury", "contract")
+COMPLIANCE_RULES_AGENTS = ("speaker", "policy", "meeting_plan")
+COMPLIANCE_CROSS_AGENTS = ("attendance", "evidence")
 
 
 @dataclass
@@ -50,7 +55,11 @@ class MissionPlan:
             "tasks": [t.to_dict() for t in self.tasks],
             "sub_agents": self.sub_agents,
             "agent_plan": self.agent_plan,
-            "registered_agents": list_registered_agents([sa["id"] for sa in self.sub_agents]),
+            "registered_agents": list_registered_agents(
+                [sa["id"] for sa in self.sub_agents],
+                include_vision=any(t.assignee == VISION_AGENT_ID for t in self.tasks),
+                include_text_ingest=any(t.assignee == TEXT_INGEST_AGENT_ID for t in self.tasks),
+            ),
         }
 
 
@@ -63,23 +72,59 @@ def _pick_assignee(sub_agents: List[Dict[str, Any]], candidates: tuple[str, ...]
 
 
 def build_default_mission(files: List[FileRecord], agent_plan: Dict[str, Any]) -> MissionPlan:
+    pack = get_domain_pack()
     sub_agents = agent_plan.get("sub_agents") or route_sub_agents(files, agent_plan)
-    focus = "、".join(agent_plan.get("focus_areas") or []) or "会计风险评估"
-    reasoning = agent_plan.get("reasoning") or f"主 Agent 拆解任务，调度 {len(sub_agents) or 1} 路子 Agent。"
+    _, vision_files = split_files_by_modality(files)
+    focus = "、".join(agent_plan.get("focus_areas") or []) or "、".join(pack.planner_focus)
+    reasoning = agent_plan.get("reasoning") or (
+        f"主 Agent（DeepSeek）拆解任务与汇总交付；"
+        f"{'视觉 Agent（GLM）处理图片，' if vision_files else ''}"
+        f"文本 Ingest 负责分拣与文档解析；调度 {len(sub_agents) or 1} 路子 Agent。"
+    )
+    rules_agents = COMPLIANCE_RULES_AGENTS if pack.name == "compliance" else RULES_AGENTS
+    cross_agents = COMPLIANCE_CROSS_AGENTS if pack.name == "compliance" else CROSS_AGENTS
 
     tasks: List[MissionTask] = [
         MissionTask(
-            id="ingest",
-            title="资料接入与结构化",
-            assignee="main",
-            assignee_name="主 Agent",
-            pipeline_steps=list(INGEST_STEPS),
-            objective="完成分类、解析与实体抽取，为各专业分析准备结构化数据",
-        )
+            id="classify",
+            title="文本 Ingest · 资料分拣",
+            assignee=TEXT_INGEST_AGENT_ID,
+            assignee_name="文本 Ingest",
+            pipeline_steps=["classifying"],
+            objective="识别资料类型，为视觉/文本解析分派做准备",
+        ),
     ]
 
-    rules_agent = _pick_assignee(sub_agents, RULES_AGENTS)
+    if vision_files:
+        tasks.append(
+            MissionTask(
+                id="vision_ingest",
+                title="视觉 Agent · 读图推理",
+                assignee=VISION_AGENT_ID,
+                assignee_name="视觉 Agent",
+                pipeline_steps=list(VISION_STEPS),
+                objective=f"GLM 视觉模型读图并推理（{len(vision_files)} 张），抽取合规证据字段",
+            )
+        )
+
+    tasks.append(
+        MissionTask(
+            id="text_ingest",
+            title="文本 Ingest · 文档解析",
+            assignee=TEXT_INGEST_AGENT_ID,
+            assignee_name="文本 Ingest",
+            pipeline_steps=list(INGEST_TEXT_STEPS),
+            objective="解析 Excel/PDF/Word 资料（含 PPT-PDF 混合页）并抽取实体",
+        )
+    )
+
+    rules_agent = _pick_assignee(sub_agents, rules_agents)
     if rules_agent:
+        rules_objective = (
+            "对照讲者时长、材料编码与 A1 计划执行合规规则扫描"
+            if pack.name == "compliance"
+            else "对票据、费用与账务类资料执行规则引擎扫描"
+        )
         tasks.append(
             MissionTask(
                 id="rules",
@@ -87,7 +132,7 @@ def build_default_mission(files: List[FileRecord], agent_plan: Dict[str, Any]) -
                 assignee=rules_agent["id"],
                 assignee_name=rules_agent["name"],
                 pipeline_steps=list(RULES_STEPS),
-                objective="对票据、费用与账务类资料执行规则引擎扫描",
+                objective=rules_objective,
             )
         )
     else:
@@ -102,8 +147,13 @@ def build_default_mission(files: List[FileRecord], agent_plan: Dict[str, Any]) -
             )
         )
 
-    cross_agent = _pick_assignee(sub_agents, CROSS_AGENTS)
+    cross_agent = _pick_assignee(sub_agents, cross_agents)
     if cross_agent:
+        cross_objective = (
+            "核对签到、远程沟通与证据链完整性"
+            if pack.name == "compliance"
+            else "银行流水、合同与票据之间的勾稽与异常检测"
+        )
         tasks.append(
             MissionTask(
                 id="cross",
@@ -111,7 +161,7 @@ def build_default_mission(files: List[FileRecord], agent_plan: Dict[str, Any]) -
                 assignee=cross_agent["id"],
                 assignee_name=cross_agent["name"],
                 pipeline_steps=list(CROSS_STEPS),
-                objective="银行流水、合同与票据之间的勾稽与异常检测",
+                objective=cross_objective,
             )
         )
     else:
@@ -133,12 +183,17 @@ def build_default_mission(files: List[FileRecord], agent_plan: Dict[str, Any]) -
             assignee="main",
             assignee_name="主 Agent",
             pipeline_steps=list(SYNTHESIS_STEPS),
-            objective="汇总各子 Agent 结论，生成 PDF/Excel 交付物",
+            objective="汇总各子 Agent 结论，生成 Finding PDF/Excel 交付物",
         )
     )
 
+    objective = (
+        f"完成「{focus}」方向的会议合规观察与 Finding 交付"
+        if pack.name == "compliance"
+        else f"完成「{focus}」方向的财务风险评估与交付"
+    )
     return MissionPlan(
-        objective=f"完成「{focus}」方向的财务风险评估与交付",
+        objective=objective,
         reasoning=reasoning,
         tasks=tasks,
         agent_plan=agent_plan,

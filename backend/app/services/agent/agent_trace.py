@@ -12,9 +12,10 @@ from app.models import AgentRunLog
 class AgentTrace:
     """结构化 Agent 执行追踪，写入 agent_run_logs。"""
 
-    def __init__(self, db: Session, project_id: str):
+    def __init__(self, db: Session, project_id: str, meeting_id: str | None = None):
         self.db = db
         self.project_id = project_id
+        self.meeting_id = meeting_id
 
     def log(
         self,
@@ -33,6 +34,7 @@ class AgentTrace:
         self.db.add(
             AgentRunLog(
                 project_id=self.project_id,
+                meeting_id=self.meeting_id,
                 step=step,
                 status=status,
                 detail_json=payload,

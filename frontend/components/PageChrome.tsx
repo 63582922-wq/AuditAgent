@@ -9,7 +9,7 @@ type PageTopProps = {
 
 export function PageTop({ title, desc, action, children }: PageTopProps) {
   return (
-    <header className="page-top">
+    <header className="page-top settling-page-top">
       <div className="page-top__main">
         <h1>{title}</h1>
         {desc && <p>{desc}</p>}
@@ -23,12 +23,13 @@ type BlockProps = {
   title?: string;
   hint?: ReactNode;
   action?: ReactNode;
+  className?: string;
   children?: ReactNode;
 };
 
-export function Block({ title, hint, action, children }: BlockProps) {
+export function Block({ title, hint, action, className, children }: BlockProps) {
   return (
-    <section className="block">
+    <section className={className ? `block settling-block ${className}` : "block settling-block"}>
       {(title || action) && (
         <div className="block-head">
           <div>

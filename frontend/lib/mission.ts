@@ -1,5 +1,6 @@
 import { Job, ProjectLive } from "@/lib/api";
-import { WORKFLOW_STEPS, overallProgress } from "@/lib/workflow";
+import { FINDING } from "@/lib/domain";
+import { WORKFLOW_STEPS, resolveLiveProgress } from "@/lib/workflow";
 
 export type MissionPhase = "init" | "ingest" | "processing" | "deliver" | "review" | "failed";
 
@@ -12,10 +13,10 @@ export type MissionPhaseDef = {
 
 /** 用户可感知的宏观链路：资料 → 分析 → 交付（复核为遗留路径） */
 export const MISSION_PHASES: MissionPhaseDef[] = [
-  { id: "init", label: "初始化", short: "INIT", icon: "01" },
-  { id: "ingest", label: "资料接入", short: "INGEST", icon: "02" },
-  { id: "processing", label: "Agent 分析", short: "RUN", icon: "03" },
-  { id: "deliver", label: "交付验收", short: "OUTPUT", icon: "04" },
+  { id: "init", label: "初始化", short: "初始化", icon: "01" },
+  { id: "ingest", label: "资料接入", short: "接入", icon: "02" },
+  { id: "processing", label: "合规分析", short: "分析", icon: "03" },
+  { id: "deliver", label: "交付验收", short: "交付", icon: "04" },
 ];
 
 export type MissionGuide = {
@@ -52,6 +53,11 @@ export type MissionProjectSource = {
   state_json?: { deliverable?: { status?: string; comment?: string } } | null;
 };
 
+function isComplianceProject(project: MissionProjectSource): boolean {
+  const state = project.state_json as { execution_mode?: string; agent_domain?: string } | undefined;
+  return state?.execution_mode === "compliance_harness" || state?.agent_domain === "compliance";
+}
+
 function countFiles(p: MissionProjectSource): number {
   return p.file_count ?? p.files?.length ?? 0;
 }
@@ -77,11 +83,17 @@ export function resolveMissionPhase(project: MissionProjectSource, job?: Job | n
 export function getMissionGuide(project: MissionProjectSource, job?: Job | null, projectId?: string): MissionGuide {
   const id = projectId ?? project.id;
   const phase = resolveMissionPhase(project, job);
-  const phaseIndex = MISSION_PHASES.findIndex((p) => p.id === phase);
+  const phaseIndex =
+    phase === "review"
+      ? MISSION_PHASES.findIndex((p) => p.id === "deliver")
+      : MISSION_PHASES.findIndex((p) => p.id === phase);
   const fileCount = countFiles(project);
   const riskCount = countRisks(project);
-  const progress = overallProgress(project.status, job?.current_step, job?.progress_pct, job?.status);
-  const live = job?.status === "running";
+  const progress = resolveLiveProgress(project, job);
+  const live =
+    job?.status === "running" ||
+    job?.status === "queued" ||
+    (PROCESSING.has(project.status) && project.status !== "completed" && project.status !== "accepted");
 
   const base = { phase, phaseIndex, progress, live };
 
@@ -89,7 +101,7 @@ export function getMissionGuide(project: MissionProjectSource, job?: Job | null,
     case "failed":
       return {
         ...base,
-        headline: "链路中断 · SIGNAL LOST",
+        headline: "观察链路中断",
         detail: job?.error_message || "分析异常终止，请查看执行日志排查",
         action: { label: "查看日志", href: `/projects/${id}/logs` },
       };
@@ -98,54 +110,63 @@ export function getMissionGuide(project: MissionProjectSource, job?: Job | null,
       if (project.status === "accepted" || dStatus === "accepted") {
         return {
           ...base,
-          headline: "验收通过 · ACCEPTED",
-          detail: `共识别 ${riskCount} 项风险 · 交付物已确认`,
-          action: { label: "查看交付物", href: `/projects/${id}/outputs` },
+          headline: "验收通过",
+          detail: `共识别 ${riskCount} 项 Finding · 交付物已确认`,
+          action: { label: "查看交付验收", href: `/projects/${id}/outputs` },
         };
       }
       if (project.status === "deliverable_rejected" || dStatus === "rejected") {
         return {
           ...base,
-          headline: "已退回 · REJECTED",
+          headline: "交付已退回",
           detail: "请调整资料或说明后重新分析",
-          action: { label: "重新分析", href: `/projects/${id}/files` },
+          action: { label: "上传资料", href: `/projects/${id}/files` },
         };
       }
       return {
         ...base,
-        headline: "待验收 · AWAITING SIGN-OFF",
-        detail: `共识别 ${riskCount} 项风险 · PDF/Excel 已生成，请验收交付物`,
-        action: { label: "验收交付物", href: `/projects/${id}/outputs` },
+        headline: "待验收交付物",
+        detail: `共识别 ${riskCount} 项 Finding · 请下载 ZIP 或逐项查阅后验收`,
+        action: { label: "交付验收", href: `/projects/${id}/outputs` },
       };
     }
     case "review":
       return {
         ...base,
-        headline: "待人工复核 · REVIEW REQUIRED",
-        detail: `${riskCount} 项风险需确认或调整`,
-        action: { label: "进入复核", href: `/projects/${id}/review` },
+        phaseIndex: MISSION_PHASES.findIndex((p) => p.id === "deliver"),
+        headline: "待人工复核",
+        detail: `${riskCount} 项 ${FINDING} 需确认或调整`,
+        action: { label: "逐条复核", href: `/projects/${id}/review` },
       };
     case "processing": {
       const step = WORKFLOW_STEPS.find((s) => s.id === (job?.current_step || project.status));
       return {
         ...base,
         headline: live ? `执行中 · ${step?.label ?? "分析"}` : "分析队列中",
-        detail: step?.desc ?? "Agent 正在处理财务资料",
+        detail: step?.desc ?? "Agent 正在处理观察资料与证据链",
         action: { label: "实时日志", href: `/projects/${id}/logs` },
       };
     }
-    case "ingest":
+    case "ingest": {
+      const compliance = isComplianceProject(project);
+      const runLabel = compliance ? "运行合规分析" : "启动分析";
       return {
         ...base,
         headline: fileCount > 0 ? `已接入 ${fileCount} 份资料` : "等待资料接入",
-        detail: fileCount > 0 ? "资料就绪，启动 Agent 全链路分析" : "上传 xlsx / csv / docx / pdf 等原始文件",
-        action: { label: fileCount > 0 ? "启动分析" : "上传资料", href: `/projects/${id}/files` },
+        detail:
+          fileCount > 0
+            ? compliance
+              ? "资料就绪，可运行合规分析并生成交付物"
+              : "资料就绪，可启动观察分析"
+            : "上传观察元数据、A1 导出、签到与证据截图",
+        action: { label: fileCount > 0 ? runLabel : "上传资料", href: `/projects/${id}/files` },
       };
+    }
     default:
       return {
         ...base,
-        headline: "项目已初始化",
-        detail: "第一步：上传财务原始资料，开启评估链路",
+        headline: "子会议已初始化",
+        detail: "第一步：导入或上传会议观察资料",
         action: { label: "上传资料", href: `/projects/${id}/files` },
       };
   }

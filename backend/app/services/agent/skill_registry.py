@@ -7,28 +7,44 @@ from typing import Any, Callable, Dict, List, Set
 from sqlalchemy.orm import Session
 
 from app.models import FileRecord, ParsedDocument
-from app.services.agent.sub_agents import SUB_AGENT_DEFS
 from app.services.agent.tool_registry import build_tool_handlers, tool_schemas
+from app.services.agent.modality_router import TEXT_INGEST_AGENT_ID, VISION_AGENT_ID, agent_modality
+from app.services.domain.registry import get_sub_agent_module
 
 SKILLS_DIR = Path(__file__).parent / "skills"
 
+_COMMON_SUB_TOOLS = [
+    "search_memory",
+    "preview_file_schema",
+    "get_execution_capabilities",
+    "inspect_agent_domain",
+]
+
+
+def _agent_defs():
+    return get_sub_agent_module().SUB_AGENT_DEFS
+
+
+def _tool_bindings() -> Dict[str, List[str]]:
+    return {agent_id: list(_COMMON_SUB_TOOLS) for agent_id in _agent_defs().keys()}
 
 def load_skill(agent_id: str) -> str:
+    if agent_id == VISION_AGENT_ID:
+        path = SKILLS_DIR / "vision_agent.md"
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip()
+        return "视觉 Agent：使用 GLM 多模态模型读图、推理并抽取合规证据字段。"
+    if agent_id == TEXT_INGEST_AGENT_ID:
+        path = SKILLS_DIR / "text_ingest.md"
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip()
+        return "文本 Ingest：资料分拣、文档解析与实体抽取。"
     path = SKILLS_DIR / f"{agent_id}.md"
     if path.exists():
         return path.read_text(encoding="utf-8").strip()
-    cfg = SUB_AGENT_DEFS.get(agent_id, {})
+    cfg = _agent_defs().get(agent_id, {})
     return str(cfg.get("agent_say") or "")
 
-
-# 各子 Agent 可使用的 Planner 工具 + 领域 inspect 工具
-SUB_AGENT_TOOL_BINDINGS: Dict[str, List[str]] = {
-    "tax": ["search_memory", "preview_file_schema", "get_execution_capabilities", "inspect_agent_domain"],
-    "invoice": ["search_memory", "preview_file_schema", "get_execution_capabilities", "inspect_agent_domain"],
-    "contract": ["search_memory", "preview_file_schema", "get_execution_capabilities", "inspect_agent_domain"],
-    "treasury": ["search_memory", "preview_file_schema", "get_execution_capabilities", "inspect_agent_domain"],
-    "ledger": ["search_memory", "preview_file_schema", "get_execution_capabilities", "inspect_agent_domain"],
-}
 
 MAIN_AGENT_TOOLS = [
     "list_uploaded_files",
@@ -49,12 +65,19 @@ class AgentRegistration:
     doc_types: Set[str] = field(default_factory=set)
 
     def to_dict(self) -> Dict[str, Any]:
+        if self.agent_id == VISION_AGENT_ID:
+            modality = "vision"
+        elif self.agent_id == TEXT_INGEST_AGENT_ID:
+            modality = "text"
+        else:
+            modality = agent_modality(self.agent_id, _agent_defs().get(self.agent_id, {}))
         return {
             "id": self.agent_id,
             "name": self.name,
             "station": self.station,
             "tools": self.tool_names,
             "doc_types": sorted(self.doc_types),
+            "modality": modality,
             "skill_preview": self.skill_text[:200],
         }
 
@@ -79,10 +102,10 @@ def _schema_by_name(name: str) -> Dict[str, Any] | None:
 
 
 def register_sub_agent(agent_id: str) -> AgentRegistration:
-    cfg = SUB_AGENT_DEFS.get(agent_id)
+    cfg = _agent_defs().get(agent_id)
     if not cfg:
         raise ValueError(f"unknown sub agent: {agent_id}")
-    tool_names = SUB_AGENT_TOOL_BINDINGS.get(agent_id, MAIN_AGENT_TOOLS)
+    tool_names = _tool_bindings().get(agent_id, MAIN_AGENT_TOOLS)
     return AgentRegistration(
         agent_id=agent_id,
         name=str(cfg["name"]),
@@ -90,6 +113,28 @@ def register_sub_agent(agent_id: str) -> AgentRegistration:
         skill_text=load_skill(agent_id),
         tool_names=list(tool_names),
         doc_types=set(cfg.get("doc_types") or []),
+    )
+
+
+def register_vision_agent() -> AgentRegistration:
+    return AgentRegistration(
+        agent_id=VISION_AGENT_ID,
+        name="视觉 Agent",
+        station="视觉席",
+        skill_text=load_skill(VISION_AGENT_ID),
+        tool_names=[],
+        doc_types=set(),
+    )
+
+
+def register_text_ingest_agent() -> AgentRegistration:
+    return AgentRegistration(
+        agent_id=TEXT_INGEST_AGENT_ID,
+        name="文本 Ingest",
+        station="结构化读档",
+        skill_text=load_skill(TEXT_INGEST_AGENT_ID),
+        tool_names=[],
+        doc_types=set(),
     )
 
 
@@ -106,7 +151,8 @@ def register_main_agent() -> AgentRegistration:
 
 def get_tools_for_agent(agent_id: str) -> List[Dict[str, Any]]:
     """MCP 风格：返回某 Agent 可用的工具 schema 列表。"""
-    names = SUB_AGENT_TOOL_BINDINGS.get(agent_id, MAIN_AGENT_TOOLS) if agent_id != "main" else MAIN_AGENT_TOOLS
+    bindings = _tool_bindings()
+    names = bindings.get(agent_id, MAIN_AGENT_TOOLS) if agent_id != "main" else MAIN_AGENT_TOOLS
     schemas: List[Dict[str, Any]] = []
     for name in names:
         schema = _schema_by_name(name)
@@ -160,7 +206,7 @@ def build_agent_handlers(
         for f in file_records
     ]
     handlers = build_tool_handlers(db, files_summary, file_records=file_records)
-    reg = register_sub_agent(agent_id) if agent_id in SUB_AGENT_DEFS else register_main_agent()
+    reg = register_sub_agent(agent_id) if agent_id in _agent_defs() else register_main_agent()
     doc_types = reg.doc_types
 
     def inspect_agent_domain() -> List[Dict[str, Any]]:
@@ -170,10 +216,20 @@ def build_agent_handlers(
     return handlers
 
 
-def list_registered_agents(active_ids: List[str] | None = None) -> List[Dict[str, Any]]:
-    ids = active_ids or list(SUB_AGENT_DEFS.keys())
+def list_registered_agents(
+    active_ids: List[str] | None = None,
+    *,
+    include_vision: bool = False,
+    include_text_ingest: bool = True,
+) -> List[Dict[str, Any]]:
+    defs = _agent_defs()
+    ids = active_ids or list(defs.keys())
     agents = [register_main_agent().to_dict()]
+    if include_text_ingest:
+        agents.append(register_text_ingest_agent().to_dict())
+    if include_vision:
+        agents.append(register_vision_agent().to_dict())
     for agent_id in ids:
-        if agent_id in SUB_AGENT_DEFS:
+        if agent_id in defs:
             agents.append(register_sub_agent(agent_id).to_dict())
     return agents

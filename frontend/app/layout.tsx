@@ -1,36 +1,50 @@
 import Script from "next/script";
 import { AppShell } from "@/components/AppShell";
+import { Providers } from "@/components/Providers";
 import "./globals.css";
+import "./settling-theme.css";
 
 export const metadata = {
-  title: "AuditAgent · 会计风险评估",
-  description: "智能体会计风险评估与交付物生成",
+  title: "AuditAgent · 会议合规远程观察",
+  description: "罗氏会议合规远程观察 Agent · Finding 自动生成与交付验收",
   icons: { icon: "/favicon.svg" },
 };
 
-/** 浏览器翻译类扩展会在 <html> 上注入属性，导致 hydration 警告 */
-const STRIP_EXTENSION_ATTRS = `
+const THEME_LOCALE_INIT = `
 (function () {
   var root = document.documentElement;
-  var blocked = ["data-immersive-translate-page-theme", "data-immersive-translate-walked"];
-  function strip() {
-    for (var i = 0; i < blocked.length; i++) root.removeAttribute(blocked[i]);
-  }
-  strip();
-  var obs = new MutationObserver(strip);
-  obs.observe(root, { attributes: true, attributeFilter: blocked });
-  window.addEventListener("DOMContentLoaded", function () { obs.disconnect(); strip(); });
+  var theme = localStorage.getItem("fxpg-theme");
+  if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+  else root.setAttribute("data-theme", "dark");
+  var locale = localStorage.getItem("fxpg-locale");
+  root.lang = locale === "en" ? "en" : "zh-CN";
+
+  root.removeAttribute("data-immersive-translate-page-theme");
+  root.removeAttribute("data-immersive-translate-walked");
+  if (root.hasAttribute("data-cursor-ref")) root.removeAttribute("data-cursor-ref");
+  var els = document.querySelectorAll("[data-cursor-ref]");
+  for (var i = 0; i < els.length; i++) els[i].removeAttribute("data-cursor-ref");
 })();
 `;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body suppressHydrationWarning>
-        <Script id="strip-extension-attrs" strategy="beforeInteractive">
-          {STRIP_EXTENSION_ATTRS}
+        <Script id="theme-locale-init" strategy="beforeInteractive">
+          {THEME_LOCALE_INIT}
         </Script>
-        <AppShell>{children}</AppShell>
+        <Providers>
+          <AppShell>{children}</AppShell>
+        </Providers>
       </body>
     </html>
   );

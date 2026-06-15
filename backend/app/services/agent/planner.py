@@ -10,12 +10,30 @@ from app.models import FileRecord
 from app.services.agent.llm_client import chat_completion, chat_json, require_agent_llm
 from app.services.agent.tool_registry import build_tool_handlers, execute_tool_call, tool_schemas
 from app.services.agent.sub_agents import enrich_plan_with_sub_agents
-from app.services.constants import REQUIRED_DOCS
+from app.services.domain.registry import get_domain_pack
 
 
 def _missing_from_files(files: List[FileRecord]) -> List[str]:
+    pack = get_domain_pack()
     categories = {f.document_category for f in files}
-    return [d[0] for d in REQUIRED_DOCS if d[0] not in categories]
+    return [d[0] for d in pack.required_docs if d[0] not in categories]
+
+
+def _planner_system_prompt() -> str:
+    pack = get_domain_pack()
+    if pack.name == "compliance":
+        return (
+            "你是罗氏会议合规远程观察 Agent 的任务规划器。根据已上传观察资料，制定分析计划。"
+            "必须先调用工具了解文件、预览结构、缺失资料、检索相关记忆、了解可执行能力，"
+            "再输出 JSON 计划。steps 数组请从 "
+            "classify/parse/extract/run_rules/cross_check/adjudicate/report 中选择。"
+        )
+    return (
+        "你是会计风险评估 Agent 的任务规划器。根据已上传资料，制定分析计划。"
+        "必须先调用工具了解文件、预览结构、缺失资料、检索相关记忆、了解可执行能力，"
+        "再输出 JSON 计划。steps 数组请从 "
+        "classify/parse/extract/run_rules/cross_check/adjudicate/report 中选择。"
+    )
 
 
 def plan_analysis(db: Session, project_id: str, files: List[FileRecord]) -> Dict[str, Any]:
@@ -35,12 +53,7 @@ def plan_analysis(db: Session, project_id: str, files: List[FileRecord]) -> Dict
     messages: List[Dict[str, Any]] = [
         {
             "role": "system",
-            "content": (
-                "你是会计风险评估 Agent 的任务规划器。根据已上传资料，制定分析计划。"
-                "必须先调用工具了解文件、预览结构、缺失资料、检索相关记忆、了解可执行能力，"
-                "再输出 JSON 计划。steps 数组请从 "
-                "classify/parse/extract/run_rules/cross_check/adjudicate/report 中选择。"
-            ),
+            "content": _planner_system_prompt(),
         },
         {
             "role": "user",

@@ -6,11 +6,12 @@ from typing import Any, Callable, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Project, Risk
+from app.models import Meeting, Project, Risk
 from app.services.agent.agent_trace import AgentTrace
 from app.services.agent.critic_readjudicate import run_critic_readjudicate_loop
 from app.services.agent.human_gate import HumanGateResult, evaluate_human_gate
-from app.services.agent.memory_writer import persist_adjudication_memories
+from app.services.agent.meeting_scope import scoped_query
+from app.services.agent.memory_writer import decide_and_persist_memories
 from app.services.agent.workflow import AgentWorkflow
 
 
@@ -33,17 +34,28 @@ class AgentRuntime:
         db: Session,
         project_id: str,
         progress_callback: Optional[Callable[[str, int], None]] = None,
+        meeting_id: Optional[str] = None,
     ):
         self.db = db
         self.project_id = project_id
+        self.meeting_id = meeting_id
         self.progress_callback = progress_callback
-        self.trace = AgentTrace(db, project_id)
+        self.trace = AgentTrace(db, project_id, meeting_id)
+
+    def _state_host(self) -> tuple[Project, Optional[Meeting], dict]:
+        project = self.db.get(Project, self.project_id)
+        if not project:
+            raise ValueError("project not found")
+        meeting = self.db.get(Meeting, self.meeting_id) if self.meeting_id else None
+        if meeting:
+            return project, meeting, dict(meeting.state_json or {})
+        return project, None, dict(project.state_json or {})
 
     def run(self, scope: str = "full") -> RuntimeResult:
         if scope not in self.SCOPES:
             raise ValueError(f"unsupported scope: {scope}")
 
-        workflow = AgentWorkflow(self.db, self.project_id, self.progress_callback)
+        workflow = AgentWorkflow(self.db, self.project_id, self.progress_callback, meeting_id=self.meeting_id)
         if scope == "full":
             mode = settings.agent_execution_mode
             if mode == "react":
@@ -60,11 +72,9 @@ class AgentRuntime:
         return self._post_process(scope)
 
     def _post_process(self, scope: str) -> RuntimeResult:
-        project = self.db.get(Project, self.project_id)
-        if not project:
-            raise ValueError("project not found")
+        project, meeting, state = self._state_host()
 
-        plan = (project.state_json or {}).get("agent_plan") or {}
+        plan = state.get("agent_plan") or {}
         critic_loop = run_critic_readjudicate_loop(self.db, self.project_id, self.trace, plan)
 
         flagged = critic_loop.flagged
@@ -91,30 +101,34 @@ class AgentRuntime:
             },
         )
 
-        risks = (
-            self.db.query(Risk)
-            .filter_by(project_id=self.project_id)
-            .filter(Risk.status != "dismissed")
-            .all()
-        )
-        critic_flag_count = sum(
-            1 for c in critic_loop.critic_results if not c.valid
-        )
+        risks = scoped_query(self.db, Risk, self.project_id, self.meeting_id).filter(
+            Risk.status != "dismissed"
+        ).all()
+        critic_flag_count = sum(1 for c in critic_loop.critic_results if not c.valid)
 
-        memories_written = persist_adjudication_memories(self.db, self.project_id)
+        feedback = state.get("deliverable_feedback") or (state.get("deliverable") or {}).get("comment")
+        memory_summary = decide_and_persist_memories(
+            self.db,
+            self.project_id,
+            self.meeting_id,
+            critic_results=critic_loop.critic_results,
+            deliverable_feedback=feedback if isinstance(feedback, str) else None,
+        )
+        memories_written = memory_summary.written
         if memories_written:
             self.trace.log(
                 "memory",
                 "completed",
                 kind="memory",
-                message=f"沉淀 {memories_written} 条案例记忆",
-                detail={"written": memories_written},
+                message=f"Agent 沉淀 {memories_written} 条长期记忆",
+                detail={"written": memories_written, "types": memory_summary.types},
             )
 
+        status_host = meeting if meeting else project
         if settings.enable_human_gate:
             gate = evaluate_human_gate(risks, critic_flag_count=critic_flag_count)
-            if gate.pause and project.status == "completed":
-                project.status = "needs_review"
+            if gate.pause and status_host.status == "completed":
+                status_host.status = "needs_review"
                 self.db.commit()
         else:
             gate = HumanGateResult(
@@ -125,7 +139,6 @@ class AgentRuntime:
                 critic_flag_count=critic_flag_count,
             )
 
-        state = dict(project.state_json or {})
         state["runtime"] = {
             "scope": scope,
             "execution_mode": settings.agent_execution_mode if scope == "full" else scope,
@@ -144,9 +157,19 @@ class AgentRuntime:
                 "llm_enabled": settings.enable_critic_llm,
             },
             "memories_written": memories_written,
+            "memory_decision": memory_summary.types,
         }
-        project.state_json = state
+        if meeting:
+            meeting.state_json = state
+        else:
+            project.state_json = state
         self.db.commit()
+
+        domain = state.get("agent_domain") or settings.agent_domain
+        if domain == "compliance":
+            AgentWorkflow(
+                self.db, self.project_id, self.progress_callback, meeting_id=self.meeting_id
+            ).regenerate_outputs_only()
 
         self.trace.log(
             "runtime",
@@ -158,7 +181,7 @@ class AgentRuntime:
 
         return RuntimeResult(
             scope=scope,
-            status=project.status,
+            status=status_host.status,
             human_gate=state["runtime"]["human_gate"],
             critic_summary=state["runtime"]["critic"],
             memories_written=memories_written,

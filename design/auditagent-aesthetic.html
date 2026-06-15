@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AuditAgent · 审美探索</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Syne:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-font-smoothing: antialiased; }
+
+    body {
+      background: #080808;
+      color: #888;
+      font-family: system-ui, sans-serif;
+      min-height: 100dvh;
+    }
+
+    .switch {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; gap: 0; border-bottom: 1px solid #1a1a1a;
+      background: rgba(8,8,8,0.92); backdrop-filter: blur(16px);
+    }
+    .switch button {
+      flex: 1; border: 0; background: transparent;
+      padding: 0.85rem 0.5rem;
+      font: 500 0.6875rem/1.3 Syne, sans-serif;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      color: #555; cursor: pointer; transition: color 0.2s, background 0.2s;
+    }
+    .switch button:hover { color: #aaa; }
+    .switch button.on { color: #f5f0eb; background: #111; }
+
+    .view { display: none; min-height: 100dvh; padding-top: 42px; }
+    .view.on { display: block; }
+
+    /* ─────────────────────────────────────────
+       I · 沉降 — 不对称、大字阶、暖暗色
+       ───────────────────────────────────────── */
+    .v1 {
+      background: #0c0b0a;
+      color: #f5f0eb;
+      font-family: Syne, "PingFang SC", sans-serif;
+      min-height: calc(100dvh - 42px);
+      display: grid;
+      grid-template-columns: minmax(280px, 34vw) 1fr;
+    }
+    .v1 .rail {
+      border-right: 1px solid rgba(245,240,235,0.06);
+      padding: 3.5rem 2.5rem;
+      display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .v1 .brand {
+      font-size: 0.6875rem; font-weight: 600;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      color: rgba(245,240,235,0.35);
+    }
+    .v1 .steps { list-style: none; margin-top: 4rem; }
+    .v1 .steps li {
+      display: grid; grid-template-columns: 2.5rem 1fr;
+      gap: 1rem; align-items: baseline;
+      padding: 1.1rem 0;
+      border-bottom: 1px solid rgba(245,240,235,0.05);
+      color: rgba(245,240,235,0.28);
+      font-size: 0.8125rem; font-weight: 500;
+      transition: color 0.3s;
+    }
+    .v1 .steps li span {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.6875rem; color: rgba(245,240,235,0.18);
+    }
+    .v1 .steps li.live {
+      color: #f5f0eb;
+    }
+    .v1 .steps li.live span { color: #c45c26; }
+    .v1 .steps li.done { color: rgba(245,240,235,0.45); }
+    .v1 .context {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.625rem; line-height: 1.7;
+      color: rgba(245,240,235,0.22);
+    }
+    .v1 .stage {
+      padding: 3.5rem 4rem 3rem 3rem;
+      display: flex; flex-direction: column; justify-content: center;
+      position: relative;
+    }
+    .v1 .stage::after {
+      content: "";
+      position: absolute; right: 8%; top: 20%; bottom: 20%; width: 1px;
+      background: linear-gradient(180deg, transparent, rgba(196,92,38,0.25), transparent);
+    }
+    .v1 .kicker {
+      font-size: 0.6875rem; letter-spacing: 0.18em;
+      text-transform: uppercase; color: #c45c26;
+      margin-bottom: 1.5rem;
+    }
+    .v1 .hero {
+      display: flex; align-items: baseline; gap: 0.15em;
+      font-size: clamp(4rem, 11vw, 7.5rem);
+      font-weight: 700; letter-spacing: -0.045em;
+      line-height: 0.95;
+    }
+    .v1 .hero em {
+      font-style: normal;
+      font-family: "IBM Plex Mono", monospace;
+      font-weight: 500; font-size: 0.45em;
+      color: rgba(245,240,235,0.35);
+      align-self: flex-end; margin-bottom: 0.15em;
+    }
+    .v1 .desc {
+      margin-top: 2rem; max-width: 28rem;
+      font-size: 0.9375rem; font-weight: 500;
+      line-height: 1.65; color: rgba(245,240,235,0.42);
+    }
+    .v1 .file {
+      margin-top: 1.25rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.75rem; color: rgba(245,240,235,0.22);
+    }
+    .v1 .metrics {
+      margin-top: auto; padding-top: 4rem;
+      display: flex; gap: 3.5rem;
+    }
+    .v1 .metrics div label {
+      display: block; font-size: 0.625rem;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: rgba(245,240,235,0.22);
+    }
+    .v1 .metrics div b {
+      display: block; margin-top: 0.35rem;
+      font-size: 1.75rem; font-weight: 600;
+      letter-spacing: -0.03em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ─────────────────────────────────────────
+       II · 晨雾 — 浅色、字即界面、编辑感
+       ───────────────────────────────────────── */
+    .v2 {
+      background: #f4f1ec;
+      color: #1e1a17;
+      font-family: Newsreader, "Noto Serif SC", serif;
+      min-height: calc(100dvh - 42px);
+    }
+    .v2 .fog {
+      min-height: inherit;
+      background:
+        radial-gradient(ellipse 90% 60% at 70% 0%, rgba(180,195,210,0.35), transparent 55%),
+        radial-gradient(ellipse 50% 40% at 10% 90%, rgba(210,190,170,0.25), transparent 50%),
+        #f4f1ec;
+      padding: 4rem 2rem 5rem;
+    }
+    .v2 .sheet {
+      max-width: 680px; margin: 0 auto;
+    }
+    .v2 .meta {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.625rem; letter-spacing: 0.08em;
+      color: rgba(30,26,23,0.38);
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid rgba(30,26,23,0.1);
+    }
+    .v2 .meta nav { display: flex; gap: 1.25rem; }
+    .v2 .meta nav a {
+      color: inherit; text-decoration: none;
+    }
+    .v2 .meta nav a.on { color: #1e1a17; border-bottom: 1px solid #1e1a17; padding-bottom: 2px; }
+    .v2 .headline {
+      margin-top: 3.5rem;
+      font-size: clamp(2.5rem, 6vw, 3.75rem);
+      font-weight: 500; letter-spacing: -0.03em;
+      line-height: 1.08;
+    }
+    .v2 .headline i {
+      font-style: italic; color: rgba(30,26,23,0.55);
+    }
+    .v2 .progress-typo {
+      margin-top: 2.5rem;
+      display: flex; align-items: baseline; gap: 0.5rem;
+    }
+    .v2 .progress-typo .n {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: clamp(3rem, 8vw, 5rem);
+      font-weight: 500; letter-spacing: -0.04em;
+      line-height: 1;
+    }
+    .v2 .progress-typo .u {
+      font-size: 1rem; color: rgba(30,26,23,0.4);
+      font-family: system-ui, sans-serif;
+    }
+    .v2 .rule {
+      margin-top: 2.5rem; height: 1px;
+      background: rgba(30,26,23,0.12);
+      position: relative;
+    }
+    .v2 .rule::after {
+      content: ""; position: absolute; left: 0; top: 0;
+      height: 2px; width: 38%; background: #1e1a17;
+    }
+    .v2 .body {
+      margin-top: 2rem;
+      font-family: system-ui, "PingFang SC", sans-serif;
+      font-size: 0.9375rem; line-height: 1.75;
+      color: rgba(30,26,23,0.55);
+    }
+    .v2 .stats {
+      margin-top: 4rem;
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+      padding-top: 2rem;
+      border-top: 1px solid rgba(30,26,23,0.08);
+    }
+    .v2 .stats div {
+      font-family: system-ui, sans-serif;
+    }
+    .v2 .stats label {
+      font-size: 0.6875rem; color: rgba(30,26,23,0.38);
+    }
+    .v2 .stats b {
+      display: block; margin-top: 0.25rem;
+      font-family: Newsreader, serif;
+      font-size: 2rem; font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    /* ─────────────────────────────────────────
+       III · 场记 — 高对比、横向时间轴、电影场记板
+       ───────────────────────────────────────── */
+    .v3 {
+      background: #eae8e4;
+      color: #111;
+      font-family: system-ui, "PingFang SC", sans-serif;
+      min-height: calc(100dvh - 42px);
+      display: flex; flex-direction: column;
+    }
+    .v3 .top {
+      flex: 1;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      padding: 2.5rem 2.5rem 0;
+      max-width: 1200px; width: 100%; margin: 0 auto;
+    }
+    .v3 .slate {
+      display: inline-grid;
+      grid-template-columns: auto 1fr;
+      border: 3px solid #111;
+      max-width: 520px;
+      box-shadow: 8px 8px 0 rgba(17,17,17,0.08);
+    }
+    .v3 .slate-mark {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      padding: 1rem 0.65rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.625rem; font-weight: 500;
+      letter-spacing: 0.15em;
+      background: #111; color: #eae8e4;
+      text-transform: uppercase;
+    }
+    .v3 .slate-body {
+      padding: 1.25rem 1.5rem;
+      background: #fff;
+    }
+    .v3 .slate-body h2 {
+      font-family: "Instrument Serif", serif;
+      font-size: 1.75rem; font-weight: 400;
+      letter-spacing: -0.02em;
+    }
+    .v3 .slate-body p {
+      margin-top: 0.35rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.6875rem; color: #666;
+    }
+    .v3 .center {
+      display: flex; align-items: center; justify-content: center;
+      padding: 2rem 0;
+    }
+    .v3 .take {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: clamp(5rem, 14vw, 9rem);
+      font-weight: 500; letter-spacing: -0.06em;
+      line-height: 1;
+      position: relative;
+    }
+    .v3 .take::after {
+      content: "TAKE";
+      position: absolute; top: -0.5rem; right: -0.15em;
+      font-size: 0.625rem; letter-spacing: 0.3em;
+      color: #d42b2b;
+    }
+    .v3 .strip {
+      border-top: 3px solid #111;
+      background: #111;
+      color: #eae8e4;
+      padding: 0;
+    }
+    .v3 .strip-inner {
+      max-width: 1200px; margin: 0 auto;
+      display: flex; align-items: stretch;
+      overflow-x: auto;
+    }
+    .v3 .beat {
+      flex: 1; min-width: 140px;
+      padding: 1.25rem 1.5rem;
+      border-right: 1px solid rgba(234,232,228,0.12);
+      transition: flex 0.4s cubic-bezier(0.4,0,0.2,1), background 0.3s;
+    }
+    .v3 .beat:last-child { border-right: 0; }
+    .v3 .beat label {
+      display: block;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.5625rem; letter-spacing: 0.2em;
+      opacity: 0.45; text-transform: uppercase;
+    }
+    .v3 .beat span {
+      display: block; margin-top: 0.35rem;
+      font-size: 0.8125rem; font-weight: 500;
+      opacity: 0.5;
+    }
+    .v3 .beat.live {
+      flex: 2.2;
+      background: #d42b2b;
+    }
+    .v3 .beat.live label { opacity: 0.7; }
+    .v3 .beat.live span { opacity: 1; font-size: 1rem; }
+    .v3 .beat.done span { opacity: 0.75; }
+
+    @media (max-width: 768px) {
+      .v1 { grid-template-columns: 1fr; }
+      .v1 .rail { border-right: 0; border-bottom: 1px solid rgba(245,240,235,0.06); padding: 2rem; }
+      .v1 .steps { margin-top: 1.5rem; }
+      .v1 .stage { padding: 2rem; }
+      .v1 .stage::after { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="switch" aria-label="审美方向">
+    <button type="button" class="on" data-view="v1">I · 沉降</button>
+    <button type="button" data-view="v2">II · 晨雾</button>
+    <button type="button" data-view="v3">III · 场记</button>
+  </nav>
+
+  <!-- I -->
+  <section class="view v1 on" id="v1">
+    <aside class="rail">
+      <div class="brand">AuditAgent</div>
+      <ol class="steps">
+        <li class="done"><span>01</span>准备</li>
+        <li class="done"><span>02</span>接入 · 30 份</li>
+        <li class="live"><span>03</span>解析文档</li>
+        <li><span>04</span>规则对撞</li>
+        <li><span>05</span>交付</li>
+      </ol>
+      <div class="context">
+        唐山会议<br />
+        A1P260307357<br /><br />
+        12 / 30 份
+      </div>
+    </aside>
+    <main class="stage">
+      <div class="kicker">Running · Parse</div>
+      <h1 class="hero">38<em>%</em></h1>
+      <p class="desc">OCR 与结构化抽取进行中。当前批次正在读取观察截图与附件。</p>
+      <p class="file">Remote_A1P260307357_线上截图 (6).jpg</p>
+      <div class="metrics">
+        <div><label>资料</label><b>30</b></div>
+        <div><label>Finding</label><b>0</b></div>
+        <div><label>交付</label><b>0</b></div>
+      </div>
+    </main>
+  </section>
+
+  <!-- II -->
+  <section class="view v2" id="v2">
+    <div class="fog">
+      <article class="sheet">
+        <header class="meta">
+          <span>唐山会议 · A1P260307357</span>
+          <nav>
+            <a href="#">总览</a>
+            <a href="#" class="on">分析</a>
+            <a href="#">资料</a>
+            <a href="#">Finding</a>
+          </nav>
+        </header>
+        <h1 class="headline">正在<i>解析</i><br />观察资料</h1>
+        <div class="progress-typo">
+          <span class="n">38</span>
+          <span class="u">percent complete</span>
+        </div>
+        <div class="rule"></div>
+        <p class="body">
+          第 12 / 30 份 · OCR 与结构化抽取<br />
+          Remote_A1P260307357_20260506_线上截图 (6).jpg
+        </p>
+        <div class="stats">
+          <div><label>资料</label><b>30</b></div>
+          <div><label>Finding</label><b>0</b></div>
+          <div><label>交付物</label><b>0</b></div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- III -->
+  <section class="view v3" id="v3">
+    <div class="top">
+      <div class="slate">
+        <div class="slate-mark">Audit</div>
+        <div class="slate-body">
+          <h2>解析文档</h2>
+          <p>SCENE A1P260307357 · ROLL 12/30</p>
+        </div>
+      </div>
+      <div class="center">
+        <div class="take">38</div>
+      </div>
+    </div>
+    <footer class="strip">
+      <div class="strip-inner">
+        <div class="beat done"><label>Prep</label><span>完成</span></div>
+        <div class="beat done"><label>Ingest</label><span>30 份</span></div>
+        <div class="beat live"><label>Parse · Live</label><span>38% · 线上截图 (6).jpg</span></div>
+        <div class="beat"><label>Rules</label><span>等待</span></div>
+        <div class="beat"><label>Out</label><span>—</span></div>
+      </div>
+    </footer>
+  </section>
+
+  <script>
+    document.querySelectorAll(".switch button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".switch button").forEach((b) => b.classList.remove("on"));
+        document.querySelectorAll(".view").forEach((v) => v.classList.remove("on"));
+        btn.classList.add("on");
+        document.getElementById(btn.dataset.view).classList.add("on");
+      });
+    });
+  </script>
+</body>
+</html>

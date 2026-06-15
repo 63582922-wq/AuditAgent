@@ -1,139 +1,167 @@
 "use client";
 
-import { WORKFLOW_STEPS, getStepStates, overallProgress } from "@/lib/workflow";
+import { FxPanel } from "@/components/FxPanel";
+import { AgentCore } from "@/components/AgentCore";
+import { getStepStates, overallProgress } from "@/lib/workflow";
+import { useI18n } from "@/lib/i18n";
+import { buildWorkflowSteps } from "@/lib/i18n/workflow-steps";
 
-type SubAgent = { id: string; name: string; station: string; agent_say?: string };
+type SubAgent = { id: string; name: string; station: string; agent_say?: string; modality?: string };
 
 type Props = {
   status: string;
   jobStep?: string;
   jobPct?: number;
   jobStatus?: string;
-  demo?: boolean;
   live?: boolean;
   agentMessage?: string;
   subAgents?: SubAgent[];
 };
-
-const AGENT_NAME = "审计助手";
 
 export function CyberWorkflow({
   status,
   jobStep,
   jobPct,
   jobStatus,
-  demo,
   live,
   agentMessage,
   subAgents,
 }: Props) {
-  const steps = getStepStates(status, jobStep, jobStatus);
-  const pct = overallProgress(status, jobStep, jobPct, jobStatus);
+  const { t, messages } = useI18n();
+  const workflowSteps = buildWorkflowSteps(messages);
+  const steps = getStepStates(status, jobStep, jobStatus, workflowSteps);
+  const pct = overallProgress(status, jobStep, jobPct, jobStatus, workflowSteps);
   const activeIdx = steps.findIndex((s) => s.state === "active");
   const active = activeIdx >= 0 ? steps[activeIdx] : undefined;
   const failed = status === "failed" || jobStatus === "failed";
   const isLive = live || jobStatus === "running";
   const isDone = status === "completed";
-
-  const doneSteps = steps.filter((s) => s.state === "done").slice(-4);
-  const pointerPct =
+  const trackPct =
     steps.length > 1
-      ? ((activeIdx >= 0 ? activeIdx : isDone ? steps.length - 1 : 0) + 0.5) / steps.length * 100
-      : 50;
+      ? ((activeIdx >= 0 ? activeIdx : isDone ? steps.length - 1 : 0) / (steps.length - 1)) * 100
+      : 0;
 
-  const avatarMode = failed ? "failed" : isDone ? "done" : isLive ? "working" : active ? "idle" : "rest";
+  const coreMode = failed ? "failed" : isDone ? "done" : isLive ? "working" : active ? "idle" : "rest";
 
   const bubbleText = failed
-    ? "抱歉，这一步遇到了问题，需要你看一下日志。"
+    ? t("hud.failedSay")
     : isDone
-      ? WORKFLOW_STEPS[WORKFLOW_STEPS.length - 1].agentSay
+      ? workflowSteps[workflowSteps.length - 1].agentSay
       : agentMessage && isLive
         ? agentMessage
-        : active?.step.agentSay ?? "我在工位等你启动任务。";
+        : active?.step.agentSay ?? t("hud.idleSay");
+
+  const ringOffset = 251 * (1 - pct / 100);
 
   return (
-    <section
-      className={`agent-work${isLive ? " agent-work--live" : ""}${failed ? " agent-work--failed" : ""}${isDone ? " agent-work--done" : ""}`}
-      aria-label="Agent 工作流程"
+    <FxPanel
+      className={`cyber-flow${isLive ? " cyber-flow--live" : ""}${failed ? " cyber-flow--failed" : ""}${isDone ? " cyber-flow--done" : ""}`}
+      glow={isLive}
     >
-      <div className="agent-work__hero">
-        <div className={`agent-avatar agent-avatar--${avatarMode}`} aria-hidden>
-          <div className="agent-avatar__head">
-            <span className="agent-avatar__eye" />
-            <span className="agent-avatar__eye" />
+      <div className="cyber-flow__noise" aria-hidden />
+
+      <div className="cyber-flow__hud">
+        <div className="cyber-flow__left">
+          <AgentCore mode={coreMode} pct={pct} />
+          <div className="cyber-flow__copy">
+            <span className="cyber-tag">{t("hud.agentName")}</span>
+            <p className="cyber-flow__status">
+              {active?.step.short ?? (isDone ? workflowSteps[workflowSteps.length - 1].short : "—")}
+              {isLive && <span className="cyber-flow__pulse-dot cyber-flow__pulse-dot--fast" aria-hidden />}
+            </p>
+            <p className="cyber-flow__sub">
+              {bubbleText}
+              {isLive && (
+                <span className="agent-work__typing" aria-hidden>
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              )}
+            </p>
+            {active && (
+              <p className="cyber-flow__station">
+                {active.step.station}
+                {isLive && jobPct != null && ` · ${jobPct}%`}
+              </p>
+            )}
+            {subAgents && subAgents.length > 0 && (
+              <ul className="agent-work__team" aria-label="Sub-agents">
+                {subAgents.map((sa) => (
+                  <li
+                    key={sa.id}
+                    className={`agent-work__team-chip${sa.modality === "vision" ? " agent-work__team-chip--vision" : ""}`}
+                    title={sa.station}
+                  >
+                    {sa.name}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          <div className="agent-avatar__body" />
-          {isLive && (
-            <div className="agent-avatar__hands">
-              <span className="agent-avatar__hand agent-avatar__hand--l" />
-              <span className="agent-avatar__hand agent-avatar__hand--r" />
-            </div>
-          )}
         </div>
 
-        <div className="agent-work__speech">
-          <div className="agent-work__speech-head">
-            <strong>{AGENT_NAME}</strong>
-            <span className="agent-work__pct">{pct}%</span>
+        <div className="cyber-ring" aria-hidden>
+          <svg viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="40" className="cyber-ring__track" />
+            <circle
+              cx="50"
+              cy="50"
+              r="40"
+              className="cyber-ring__fill"
+              style={{ strokeDasharray: 251, strokeDashoffset: ringOffset }}
+            />
+          </svg>
+          <div className="cyber-ring__text">
+            <span className="cyber-ring__num">{pct}</span>
+            <span className="cyber-ring__unit">%</span>
           </div>
-          <p className="agent-work__line">
-            {bubbleText}
-            {isLive && (
-              <span className="agent-work__typing" aria-hidden>
-                <span /><span /><span />
-              </span>
-            )}
-          </p>
-          {active && (
-            <p className="agent-work__station">
-              当前工位 · <em>{active.step.station}</em>
-              {isLive && jobPct != null && ` · 本步 ${jobPct}%`}
-            </p>
-          )}
-          {subAgents && subAgents.length > 0 && (
-            <ul className="agent-work__team" aria-label="协同子 Agent">
-              {subAgents.map((sa) => (
-                <li key={sa.id} className="agent-work__team-chip" title={sa.station}>
-                  {sa.name}
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
       </div>
 
-      <div className="agent-work__floor">
-        <div
-          className="agent-work__marker"
-          style={{ left: `${pointerPct}%` }}
-          aria-hidden
-        >
-          <span className="agent-work__marker-icon">▲</span>
-        </div>
-        <ol className="agent-work__stations">
-          {steps.map(({ step, state }) => (
+      <div className="cyber-flow__track-wrap">
+        <div className="cyber-flow__track-bg" aria-hidden />
+        <div className="cyber-flow__track-fill" style={{ width: `${trackPct}%` }} aria-hidden />
+        <ol className="cyber-flow__nodes">
+          {steps.map(({ step, state }, i) => (
             <li
               key={step.id}
-              className={`agent-work__station agent-work__station--${state}`}
+              className={`cyber-node cyber-node--${state}`}
               title={step.desc}
             >
-              <span className="agent-work__station-desk">{step.station}</span>
-              <span className="agent-work__station-name">{step.short}</span>
+              {state === "active" && isLive && <span className="cyber-node__scan" aria-hidden />}
+              <span className="cyber-node__hex">
+                <span className="cyber-node__idx">{String(i + 1).padStart(2, "0")}</span>
+              </span>
+              <span className="cyber-node__label">{step.short}</span>
             </li>
           ))}
         </ol>
       </div>
 
-      {doneSteps.length > 0 && (
-        <ul className="agent-work__journal">
-          {doneSteps.map(({ step }) => (
-            <li key={step.id}>
-              <span className="agent-work__journal-check">✓</span>
-              {step.agentDone}
-            </li>
-          ))}
-        </ul>
+      {active && isLive && (
+        <div className="cyber-flow__spotlight">
+          <span className="cyber-flow__spotlight-step">{String(activeIdx + 1).padStart(2, "0")}</span>
+          <span className="cyber-flow__spotlight-name">{active.step.label}</span>
+          <span className="cyber-flow__spotlight-desc">{active.step.desc}</span>
+          <span className="cyber-flow__spotlight-pct">{jobPct ?? pct}%</span>
+        </div>
       )}
-    </section>
+
+      <div className="cyber-flow__meta">
+        {isLive ? (
+          <>
+            <span className="cyber-flow__pulse-dot" aria-hidden />
+            {t("hud.liveRun")}
+          </>
+        ) : isDone ? (
+          t("workflow.status.completed")
+        ) : failed ? (
+          t("workflow.status.failed")
+        ) : (
+          t("hud.idleSay")
+        )}
+      </div>
+    </FxPanel>
   );
 }

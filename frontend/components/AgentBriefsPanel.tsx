@@ -2,57 +2,46 @@
 
 import { Block } from "@/components/PageChrome";
 import { ProjectStateJson } from "@/lib/api";
+import { agentLabel } from "@/lib/domain";
+import { useI18n } from "@/lib/i18n";
 
 type Props = {
   state?: ProjectStateJson | null;
 };
 
-const AGENT_LABEL: Record<string, string> = {
-  tax: "税务专员",
-  invoice: "票据专员",
-  contract: "合同专员",
-  treasury: "资金专员",
-  ledger: "账务专员",
-};
-
 export function AgentBriefsPanel({ state }: Props) {
+  const { t } = useI18n();
   const briefs = state?.sub_agent_briefs;
   const synthesis = state?.synthesis_brief;
+  const registered = state?.mission?.registered_agents;
   const keys = briefs ? Object.keys(briefs) : [];
 
   if (!keys.length && !synthesis?.summary) return null;
 
+  function labelFor(id: string, title?: string) {
+    const reg = registered?.find((a) => a.id === id);
+    return reg?.name || agentLabel(id, title);
+  }
+
   return (
-    <Block title="Agent 专员简报" hint={`${keys.length} 路子 Agent`}>
+    <Block title={t("components.briefs.title")} hint={t("components.briefs.hint", { count: keys.length })}>
       {synthesis?.summary && (
-        <div style={{ marginBottom: "1rem", paddingBottom: "1rem", borderBottom: "1px solid var(--line)" }}>
-          <div className="muted" style={{ fontSize: "0.75rem", marginBottom: "0.35rem" }}>
-            主 Agent 汇总
-          </div>
-          <p style={{ margin: 0, fontSize: "0.875rem", lineHeight: 1.6 }}>{synthesis.summary}</p>
+        <div className="settling-briefs__synthesis">
+          <div className="muted settling-briefs__label">{t("components.briefs.synthesis")}</div>
+          <p className="settling-briefs__text">{synthesis.summary}</p>
         </div>
       )}
 
-      <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+      <div className="settling-briefs__grid">
         {keys.map((id) => {
           const b = briefs![id];
           return (
-            <div
-              key={id}
-              style={{
-                padding: "0.75rem",
-                border: "1px solid var(--line)",
-                borderRadius: "var(--radius-sm)",
-                background: "var(--surface-2)",
-              }}
-            >
-              <div className="muted" style={{ fontSize: "0.75rem", marginBottom: "0.35rem" }}>
-                {AGENT_LABEL[id] || b?.title || id}
-              </div>
-              <p style={{ margin: 0, fontSize: "0.8125rem", lineHeight: 1.55 }}>{b?.summary || "—"}</p>
+            <div key={id} className="settling-brief-card">
+              <div className="muted settling-briefs__label">{labelFor(id, b?.title)}</div>
+              <p className="settling-briefs__text">{b?.summary || "—"}</p>
               {b?.tools_used && b.tools_used.length > 0 && (
-                <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.5rem" }}>
-                  工具: {b.tools_used.join(", ")}
+                <div className="muted settling-briefs__tools">
+                  {t("components.briefs.tools", { list: b.tools_used.join(", ") })}
                 </div>
               )}
             </div>

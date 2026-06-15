@@ -11,7 +11,9 @@
     "dev:webpack": "next dev",
     "build": "next build",
     "start": "next start",
-    "preview": "next build && next start"
+    "preview": "next build && next start",
+    "lint": "next lint",
+    "format": "prettier --write ."
   },
   "dependencies": {
     "next": "15.1.3",
@@ -21,6 +23,9 @@
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "15.1.3",
+    "prettier": "^3.3.3",
     "typescript": "^5.7.2"
   }
 }

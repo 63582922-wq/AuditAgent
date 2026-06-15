@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List
 from sqlalchemy.orm import Session
 
 from app.models import FileRecord
-from app.services.constants import REQUIRED_DOCS
+from app.services.domain.registry import get_domain_pack
 from app.services.memory_rag import format_memories_for_prompt, retrieve_memories
 from app.services.parsers.excel_parser import parse_excel
 
@@ -136,7 +136,8 @@ def build_tool_handlers(
         return files_summary
 
     def get_required_documents() -> List[Dict[str, str]]:
-        return [{"document_type": d[0], "importance": d[1], "reason": d[2]} for d in REQUIRED_DOCS]
+        pack = get_domain_pack()
+        return [{"document_type": d[0], "importance": d[1], "reason": d[2]} for d in pack.required_docs]
 
     def search_memory(query: str, risk_category: str = "") -> str:
         mems = retrieve_memories(

@@ -1,0 +1,86 @@
+[
+  {
+    "rule_id": "CMP-001",
+    "rule_name": "付费讲者讲课时长不足15分钟",
+    "risk_category": "违反公司制度",
+    "risk_level": "高",
+    "applicable_document_type": "observation_confirmation",
+    "condition": {"all": [{"field": "speaker_service_minutes", "operator": "<", "value": 15}]},
+    "evidence_fields": ["speaker_name", "speaker_service_minutes", "planned_duration_minutes"],
+    "suggestion_template": "付费讲者服务时长（含讨论）少于15分钟，需对照 Remote Finding 模板撰写。",
+    "manual_review_required": false,
+    "priority": 100
+  },
+  {
+    "rule_id": "CMP-002",
+    "rule_name": "计划与实际时长不一致",
+    "risk_category": "计划不一致",
+    "risk_level": "中",
+    "applicable_document_type": "meeting_case",
+    "condition": {"all": [{"field": "duration_delta_minutes", "operator": ">", "value": 5}]},
+    "evidence_fields": ["planned_duration_minutes", "actual_duration_minutes"],
+    "suggestion_template": "计划会议时长与实际观察时长差异较大，需在 Finding 中说明。",
+    "manual_review_required": false,
+    "priority": 90
+  },
+  {
+    "rule_id": "CMP-003",
+    "rule_name": "缺少现场确认单",
+    "risk_category": "未成功观察",
+    "risk_level": "高",
+    "applicable_document_type": "meeting_case",
+    "condition": {"all": [{"field": "has_confirmation", "operator": "==", "value": "false"}]},
+    "evidence_fields": ["meeting_code"],
+    "suggestion_template": "未找到现场确认单/观察记录确认书，无法完成合规观察结论。",
+    "manual_review_required": true,
+    "priority": 110
+  },
+  {
+    "rule_id": "CMP-004",
+    "rule_name": "缺少A1会议导出",
+    "risk_category": "未成功观察",
+    "risk_level": "高",
+    "applicable_document_type": "meeting_case",
+    "condition": {"all": [{"field": "has_a1_export", "operator": "==", "value": "false"}]},
+    "evidence_fields": ["meeting_code"],
+    "suggestion_template": "缺少 A1 会议系统导出资料，无法核对计划信息。",
+    "manual_review_required": true,
+    "priority": 105
+  },
+  {
+    "rule_id": "CMP-005",
+    "rule_name": "演讲材料编码缺失",
+    "risk_category": "违反公司制度",
+    "risk_level": "中",
+    "applicable_document_type": "observation_confirmation",
+    "condition": {"all": [{"field": "material_code", "operator": "is_empty"}]},
+    "evidence_fields": ["speaker_name", "presentation_topic"],
+    "suggestion_template": "现场确认单或 A1 中未能提取 PMA/NP 材料编码，需补充材料信息。",
+    "manual_review_required": false,
+    "priority": 85
+  },
+  {
+    "rule_id": "CMP-006",
+    "rule_name": "签到人数与计划不符",
+    "risk_category": "计划不一致",
+    "risk_level": "中",
+    "applicable_document_type": "meeting_case",
+    "condition": {"all": [{"field": "attendance_delta", "operator": ">", "value": 2}]},
+    "evidence_fields": ["planned_attendees", "actual_sign_in_count"],
+    "suggestion_template": "签到人数与计划/确认单人数差异明显，需 case by case 讨论。",
+    "manual_review_required": false,
+    "priority": 80
+  },
+  {
+    "rule_id": "CMP-007",
+    "rule_name": "远程观察沟通记录缺失",
+    "risk_category": "未成功观察",
+    "risk_level": "低",
+    "applicable_document_type": "meeting_case",
+    "condition": {"all": [{"field": "has_coordination_sms", "operator": "==", "value": "false"}]},
+    "evidence_fields": ["observation_type"],
+    "suggestion_template": "远程观察建议保留与组织者的沟通短信/记录。",
+    "manual_review_required": false,
+    "priority": 50
+  }
+]

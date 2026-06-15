@@ -24,8 +24,11 @@ def test_build_default_mission_structure():
         ],
     }
     mission = build_default_mission(files, plan)
-    assert mission.tasks[0].assignee == "main"
-    assert mission.tasks[0].pipeline_steps == ["classifying", "parsing", "extracting"]
+    assert mission.tasks[0].assignee == "text_ingest"
+    assert mission.tasks[0].pipeline_steps == ["classifying"]
+    text_parse = next(t for t in mission.tasks if t.id == "text_ingest")
+    assert text_parse.pipeline_steps == ["parsing", "extracting"]
+    assert mission.tasks[-1].assignee == "main"
     assert mission.tasks[-1].pipeline_steps == ["adjudicating", "generating_report"]
     assignees = [t.assignee for t in mission.tasks]
     assert "main" in assignees

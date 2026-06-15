@@ -1,0 +1,27 @@
+[
+  {
+    "category": "违反公司制度",
+    "check_point": "付费讲者讲课时间少于15分钟（含讨论时间）",
+    "remote_template": "1.付费讲者的讲课时间少于15分钟（含讨论时间）\n本次会议为线上/线上+线下会议。\n观察员通过XXX平台XX:XX-XX:XX的全程连线观察到..."
+  },
+  {
+    "category": "计划不一致",
+    "check_point": "计划与实际时长不一致",
+    "remote_template": "观察员根据会议计划与现场确认单，发现计划时长与实际时长存在差异，需说明..."
+  },
+  {
+    "category": "未成功观察",
+    "check_point": "缺少现场确认单",
+    "remote_template": "观察员未能取得现场确认单/观察记录确认书，无法完成观察结论..."
+  },
+  {
+    "category": "违反公司制度",
+    "check_point": "演讲材料编码缺失",
+    "remote_template": "讲者实际演讲PPT未能体现有效PMA/NP编码或编码信息缺失..."
+  },
+  {
+    "category": "计划不一致",
+    "check_point": "签到人数与计划不符",
+    "remote_template": "签到表/线上平台参会姓名与计划人数或确认单不一致..."
+  }
+]

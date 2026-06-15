@@ -1,5 +1,7 @@
 "use client";
 
+import { useI18n } from "@/lib/i18n";
+
 type Props = {
   high: number;
   medium: number;
@@ -8,8 +10,9 @@ type Props = {
 };
 
 export function RiskChart({ high, medium, low, total }: Props) {
+  const { t } = useI18n();
   const sum = total ?? high + medium + low;
-  if (sum === 0) return <p className="muted">暂无数据</p>;
+  if (sum === 0) return <p className="muted">{t("common.empty")}</p>;
 
   const hPct = (high / sum) * 100;
   const mPct = (medium / sum) * 100;
@@ -24,23 +27,23 @@ export function RiskChart({ high, medium, low, total }: Props) {
       <div className="risk-chart__ring" style={{ background: gradient }}>
         <div className="risk-chart__center">
           <span className="risk-chart__total">{sum}</span>
-          <span className="risk-chart__label">项</span>
+          <span className="risk-chart__label">{t("components.riskChart.unit")}</span>
         </div>
       </div>
       <div className="risk-chart__legend">
         <div className="risk-chart__leg-item">
           <span className="risk-chart__swatch" style={{ background: "var(--risk-high)" }} />
-          高 {high}
+          {t("components.riskChart.high")} {high}
           <em>{((high / sum) * 100).toFixed(0)}%</em>
         </div>
         <div className="risk-chart__leg-item">
           <span className="risk-chart__swatch" style={{ background: "var(--risk-mid)" }} />
-          中 {medium}
+          {t("components.riskChart.medium")} {medium}
           <em>{((medium / sum) * 100).toFixed(0)}%</em>
         </div>
         <div className="risk-chart__leg-item">
           <span className="risk-chart__swatch" style={{ background: "var(--risk-low)" }} />
-          低 {low}
+          {t("components.riskChart.low")} {low}
           <em>{((low / sum) * 100).toFixed(0)}%</em>
         </div>
       </div>

@@ -1,7 +1,8 @@
 "use client";
 
-import { STATUS_LABEL } from "@/lib/workflow";
 import { formatTime } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
+import { statusLabel } from "@/lib/i18n/workflow-steps";
 
 export type ActivityLog = {
   id: string;
@@ -12,46 +13,34 @@ export type ActivityLog = {
   created_at: string;
 };
 
-const KIND_LABEL: Record<string, string> = {
-  step: "步骤",
-  tool: "工具",
-  plan: "规划",
-  llm: "推理",
-  critic: "Critic",
-  memory: "记忆",
-  react: "ReAct",
-  sub_agent: "子 Agent",
-  main_agent: "主 Agent",
-  orchestrator: "Orchestrator",
-  mission: "任务拆解",
-  runtime: "Runtime",
-};
-
-function logTitle(log: ActivityLog): string {
+export function traceLogTitle(log: ActivityLog, t: (k: string, v?: Record<string, string | number>) => string, messages: ReturnType<typeof useI18n>["messages"]): string {
   const detail = log.detail_json || {};
   const kind = String(detail.kind || "step");
   const name = String(detail.name || log.step);
-  if (kind === "plan") return "Agent 执行计划";
-  if (kind === "mission") return "主 Agent 任务拆解";
-  if (kind === "critic") return "Critic 证据链质检";
-  if (kind === "memory") return "长期记忆沉淀";
-  if (kind === "runtime") return "Agent Runtime";
-  if (kind === "react") return "ReAct 调度";
-  if (kind === "sub_agent") return `子 Agent · ${name}`;
-  if (kind === "main_agent") return `主 Agent · ${name}`;
-  if (kind === "orchestrator") return "Orchestrator";
+  if (kind === "plan") return t("workflow.logTitle.plan");
+  if (kind === "mission") return t("workflow.logTitle.mission");
+  if (kind === "critic") return t("workflow.logTitle.critic");
+  if (kind === "memory") return t("workflow.logTitle.memory");
+  if (kind === "runtime") return t("workflow.logTitle.runtime");
+  if (kind === "react") return t("workflow.logTitle.react");
+  if (kind === "sub_agent") return t("workflow.logTitle.subAgent", { name });
+  if (kind === "main_agent") return t("workflow.logTitle.mainAgent", { name });
+  if (kind === "orchestrator") return t("workflow.logTitle.orchestrator");
+  if (kind === "vision_agent") return t("workflow.logTitle.visionAgent", { name: name || "视觉 Agent" });
   if (kind === "tool") {
     const mcp = detail.mcp === true || name.startsWith("mcp_");
-    return mcp ? `MCP 工具 · ${name}` : `工具 · ${name}`;
+    return mcp ? t("workflow.logTitle.mcpTool", { name }) : t("workflow.logTitle.tool", { name });
   }
-  if (log.step === "orchestrator") return "Orchestrator";
-  return STATUS_LABEL[log.step] || STATUS_LABEL[name] || name;
+  if (log.step === "orchestrator") return t("workflow.logTitle.orchestrator");
+  return statusLabel(log.step, messages) || statusLabel(name, messages) || name;
 }
 
 function logMessage(log: ActivityLog): string | null {
   const detail = log.detail_json || {};
   const message = typeof detail.message === "string" ? detail.message : "";
   if (message) return message;
+  const error = typeof detail.error === "string" ? detail.error : "";
+  if (error) return error;
   if (detail.kind === "plan" && detail.execution_graph && typeof detail.execution_graph === "object") {
     const graph = detail.execution_graph as Record<string, unknown>;
     if (typeof graph.agent_message === "string") return graph.agent_message;
@@ -59,30 +48,57 @@ function logMessage(log: ActivityLog): string | null {
   return null;
 }
 
-function logMeta(log: ActivityLog): string[] {
+function logMeta(
+  log: ActivityLog,
+  t: (k: string, v?: Record<string, string | number>) => string,
+  messages: ReturnType<typeof useI18n>["messages"]
+): string[] {
   const detail = log.detail_json || {};
   const parts: string[] = [log.status];
   const kind = detail.kind ? String(detail.kind) : "";
-  if (kind && KIND_LABEL[kind]) parts.push(KIND_LABEL[kind]);
+  if (kind && messages.workflow.logKind[kind]) parts.push(messages.workflow.logKind[kind]);
   if (log.duration_ms != null) parts.push(`${log.duration_ms} ms`);
   if (detail.modules && Array.isArray(detail.modules)) {
-    parts.push(`模块: ${(detail.modules as string[]).join(", ")}`);
+    parts.push(t("settings.logMetaModules", { list: (detail.modules as string[]).join(", ") }));
   }
-  if (typeof detail.rule_hits === "number") parts.push(`命中 ${detail.rule_hits} 条`);
-  if (typeof detail.risk_count === "number") parts.push(`${detail.risk_count} 项风险`);
+  if (typeof detail.rule_hits === "number") parts.push(t("settings.logMetaHits", { count: detail.rule_hits }));
+  if (typeof detail.risk_count === "number") parts.push(t("settings.logMetaFindings", { count: detail.risk_count }));
   if (typeof detail.readjudicate_rounds === "number" && detail.readjudicate_rounds > 0) {
-    parts.push(`重研判 ${detail.readjudicate_rounds} 轮`);
+    parts.push(t("settings.logMetaRounds", { rounds: detail.readjudicate_rounds }));
+  }
+  if (typeof detail.retry_attempt === "number" && typeof detail.retry_max === "number") {
+    parts.push(t("settings.logMetaRetry", { attempt: detail.retry_attempt, max: detail.retry_max }));
+  }
+  if (typeof detail.wait_sec === "number") {
+    parts.push(t("settings.logMetaWaitSec", { sec: detail.wait_sec }));
+  }
+  if (typeof detail.code === "string" && detail.code) {
+    parts.push(detail.code);
   }
   if (detail.brief && typeof detail.brief === "object") {
     const brief = detail.brief as { tools_used?: string[] };
-    if (brief.tools_used?.length) parts.push(`工具 ${brief.tools_used.length} 次`);
+    if (brief.tools_used?.length) parts.push(t("settings.logMetaTools", { count: brief.tools_used.length }));
   }
   return parts;
 }
 
+export function pickLiveAgentMessage(logs: ActivityLog[]): string | null {
+  for (let i = logs.length - 1; i >= 0; i -= 1) {
+    const msg = logMessage(logs[i]!);
+    if (msg) return msg;
+  }
+  return null;
+}
+
+export function pickRecentTraceLogs(logs: ActivityLog[], limit = 6): ActivityLog[] {
+  return logs.slice(-limit);
+}
+
 export function ActivityTimeline({ logs }: { logs: ActivityLog[] }) {
+  const { t, messages } = useI18n();
+
   if (!logs.length) {
-    return <p className="timeline-empty">执行分析后，Agent 步骤、工具调用与耗时将在此记录</p>;
+    return <p className="timeline-empty">{t("settings.timelineEmpty")}</p>;
   }
 
   const sorted = [...logs].reverse();
@@ -100,14 +116,14 @@ export function ActivityTimeline({ logs }: { logs: ActivityLog[] }) {
           <div className="timeline__item" key={log.id}>
             <time className="timeline__time">{formatTime(log.created_at)}</time>
             <div>
-              <div className="timeline__title">{logTitle(log)}</div>
+              <div className="timeline__title">{traceLogTitle(log, t, messages)}</div>
               {message && <p className="timeline__message">{message}</p>}
               <div className="timeline__meta">
-                {logMeta(log).map((part) => (
+                {logMeta(log, t, messages).map((part) => (
                   <span key={part}>{part}</span>
                 ))}
               </div>
-              {showRaw && (
+              {showRaw && process.env.NODE_ENV === "development" && (
                 <pre className="timeline__detail">{JSON.stringify(detail, null, 2)}</pre>
               )}
             </div>

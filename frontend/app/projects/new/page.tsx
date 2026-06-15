@@ -1,10 +1,15 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useState } from "react";
 import { Block, PageTop } from "@/components/PageChrome";
 import { Project, api } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 export default function NewProjectPage() {
+  const router = useRouter();
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [phase, setPhase] = useState<"idle" | "creating" | "entering">("idle");
   const [error, setError] = useState("");
@@ -13,7 +18,7 @@ export default function NewProjectPage() {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {
-      setError("请输入项目名称");
+      setError(t("newProject.nameRequired"));
       return;
     }
     if (phase !== "idle") return;
@@ -26,27 +31,39 @@ export default function NewProjectPage() {
         body: JSON.stringify({ name: trimmed }),
       });
       setPhase("entering");
-      // 硬跳转：dev 下 client router 编译 /files 路由常卡住，router.push 会无声失败
-      window.location.assign(`/projects/${p.id}/files`);
+      router.push(`/projects/${p.id}`);
     } catch (err) {
       setPhase("idle");
       const msg = err instanceof Error ? err.message : String(err);
-      setError(msg.includes("Failed to fetch") ? "无法连接后端，请确认 8000 端口已启动" : msg);
+      setError(msg.includes("Failed to fetch") ? t("newProject.offline") : msg);
     }
   }
 
   const busy = phase !== "idle";
-  const btnLabel = phase === "creating" ? "创建中…" : phase === "entering" ? "正在进入…" : "创建项目";
+  const submitLabel =
+    phase === "creating"
+      ? t("newProject.creating")
+      : phase === "entering"
+        ? t("newProject.enteringManual")
+        : t("newProject.manualSubmit");
 
   return (
     <>
-      <PageTop title="新建项目" desc="输入名称后创建 · 自动进入资料上传页" />
+      <PageTop
+        title={t("newProject.title")}
+        desc={t("newProject.desc")}
+        action={
+          <Link href="/projects" className="btn btn-outline">
+            {t("nav.backProjects")}
+          </Link>
+        }
+      />
 
-      <Block title="项目名称">
+      <Block title={t("newProject.manualTitle")} hint={t("newProject.manualHint")}>
         <form onSubmit={onSubmit} style={{ maxWidth: 420 }} noValidate>
           <input
             className="input"
-            placeholder="某公司 2025 年度会计风险评估"
+            placeholder={t("newProject.manualPlaceholder")}
             value={name}
             onChange={(e) => {
               setName(e.target.value);
@@ -54,29 +71,17 @@ export default function NewProjectPage() {
             }}
             disabled={busy}
             autoFocus
-            aria-invalid={!!error}
-            aria-describedby={error ? "project-name-error" : undefined}
           />
           {error && (
-            <p id="project-name-error" className="alert danger" style={{ marginTop: "0.75rem" }}>
+            <p className="alert danger" style={{ marginTop: "0.75rem" }}>
               {error}
-            </p>
-          )}
-          {phase === "entering" && !error && (
-            <p className="alert success" style={{ marginTop: "0.75rem" }}>
-              项目已创建 · 正在打开资料页（首次可能需等待编译）…
             </p>
           )}
           <div style={{ marginTop: "1rem" }}>
             <button type="submit" className={`btn${busy ? " is-busy" : ""}`} disabled={busy}>
-              {btnLabel}
+              {submitLabel}
             </button>
           </div>
-          {!name.trim() && phase === "idle" && (
-            <p className="muted" style={{ marginTop: "0.75rem", fontSize: "0.8125rem" }}>
-              请先输入项目名称
-            </p>
-          )}
         </form>
       </Block>
     </>

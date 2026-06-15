@@ -31,6 +31,7 @@ def mock_agent_llm(monkeypatch):
     monkeypatch.setattr(settings, "human_gate_high_threshold", 999)
     monkeypatch.setattr(settings, "human_gate_critic_threshold", 999)
     monkeypatch.setattr(settings, "enable_critic_llm", False)
+    monkeypatch.setattr(settings, "agent_domain", "accounting")
     monkeypatch.setattr(settings, "agent_execution_mode", "pipeline")
     monkeypatch.setattr(settings, "enable_sub_agent_llm", False)
     monkeypatch.setattr(settings, "mcp_servers", "[]")

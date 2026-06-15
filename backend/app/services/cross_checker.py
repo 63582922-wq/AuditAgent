@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 import uuid
 from typing import Any
 
@@ -143,11 +141,12 @@ def detect_duplicate_invoices(rows: list[dict]) -> list[dict]:
     return risks
 
 
-def check_missing_documents(present_categories: set[str]) -> list[dict]:
-    from app.services.constants import REQUIRED_DOCS
+def check_missing_documents(present_categories: set[str], *, domain: str | None = None) -> list[dict]:
+    from app.services.domain.registry import get_domain_pack
 
+    pack = get_domain_pack(domain=domain) if domain else get_domain_pack()
     missing = []
-    for doc_type, importance, reason in REQUIRED_DOCS:
+    for doc_type, importance, reason in pack.required_docs:
         if doc_type not in present_categories:
             missing.append({"document_type": doc_type, "importance": importance, "reason": reason})
     return missing

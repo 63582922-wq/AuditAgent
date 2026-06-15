@@ -14,7 +14,4 @@ httpx==0.28.1
 rapidfuzz==3.11.0
 alembic==1.14.0
 
-# OCR（需系统安装 tesseract：brew install tesseract tesseract-lang）
-# pytesseract==0.3.13
-
-psycopg2-binary==2.9.10
+# PostgreSQL 驱动见 requirements-postgres.txt（Docker / 生产环境）

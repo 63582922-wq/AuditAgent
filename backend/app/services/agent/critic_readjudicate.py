@@ -48,8 +48,8 @@ def _build_readjudicate_prompt(
             }
         )
     return (
-        "你是会计风险评估 Agent。上一轮研判未通过 Critic 证据链校验，请根据 Critic 意见修正研判。\n"
-        "要求：analysis 中的数值必须能在 evidence 中找到；不要编造未出现的金额。\n"
+        "你是会议合规 Remote Finding 审核 Agent。上一轮 Finding 未通过 Critic 证据链校验，请根据 Critic 意见修正描述。\n"
+        "要求：analysis 中的事实与数值必须能在 evidence 中找到；不要编造未出现的会议时长、人数或材料编码。\n"
         f"分析重点：{focus or '综合'}\n"
         f"相关记忆：\n{memory_text}\n"
         f"待修正风险：\n{json.dumps(items, ensure_ascii=False)}\n"

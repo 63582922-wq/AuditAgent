@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AuditAgent · 五套完全不同的视觉语言</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Instrument+Sans:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Noto+Serif+SC:wght@400;600&family=Source+Sans+3:wght@400;500;600&family=Fraunces:opsz,wght@9..144,300;9..144,600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Inter, "PingFang SC", sans-serif;
+      background: #111;
+      color: #ccc;
+      min-height: 100dvh;
+    }
+
+    /* ── 中性壳：不抢戏 ── */
+    .shell {
+      position: sticky; top: 0; z-index: 300;
+      background: #111;
+      border-bottom: 1px solid #222;
+      padding: 1rem 1.25rem 1.125rem;
+    }
+    .shell h1 {
+      font-size: 0.9375rem; font-weight: 600; color: #eee;
+      letter-spacing: -0.02em;
+    }
+    .shell .note {
+      margin-top: 0.45rem;
+      font-size: 0.8125rem; line-height: 1.65; color: #888;
+      max-width: 780px;
+    }
+    .shell .note em { color: #bbb; font-style: normal; }
+    .shell .rut {
+      display: inline; color: #666; text-decoration: line-through;
+    }
+    .picker {
+      display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.85rem;
+    }
+    .picker button {
+      font: inherit; font-size: 0.6875rem; font-weight: 500;
+      padding: 0.38rem 0.7rem;
+      border: 1px solid #333; background: #1a1a1a; color: #999;
+      cursor: pointer; transition: 0.2s;
+      letter-spacing: 0.01em;
+    }
+    .picker button:hover { border-color: #555; color: #ccc; }
+    .picker button.on { background: #eee; color: #111; border-color: #eee; }
+
+    .scene { display: none; min-height: calc(100dvh - 130px); }
+    .scene.on { display: block; }
+
+    /* shared mock content helpers */
+    .crumb { font-size: 0.6875rem; opacity: 0.55; margin-bottom: 1rem; }
+    .stat-row { display: flex; gap: 2rem; margin-top: auto; }
+    .stat-row div label {
+      display: block; font-size: 0.625rem; letter-spacing: 0.08em;
+      text-transform: uppercase; opacity: 0.5;
+    }
+    .stat-row div b {
+      display: block; margin-top: 0.15rem;
+      font-size: 1.375rem; font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ═══════════════════════════════════════
+       A · 纸面审计 — 原研哉式，零曲线
+       色：米纸 / 墨 / 朱
+       ═══════════════════════════════════════ */
+    .a {
+      background: #FAF8F4;
+      color: #1A1A1A;
+      font-family: "Noto Serif SC", "DM Sans", serif;
+      padding: 2.5rem 2rem 4rem;
+    }
+    .a .frame {
+      max-width: 960px; margin: 0 auto;
+      border-top: 2px solid #1A1A1A;
+      padding-top: 2rem;
+    }
+    .a .top {
+      display: grid; grid-template-columns: 1fr auto;
+      gap: 2rem; align-items: start;
+      padding-bottom: 2rem;
+      border-bottom: 1px solid rgba(26,26,26,0.12);
+    }
+    .a .mark {
+      width: 28px; height: 28px;
+      border: 2px solid #C41E3A;
+      margin-bottom: 1.25rem;
+    }
+    .a nav { text-align: right; }
+    .a nav a {
+      display: block; font-family: "DM Sans", sans-serif;
+      font-size: 0.75rem; color: #888; text-decoration: none;
+      padding: 0.35rem 0; letter-spacing: 0.04em;
+    }
+    .a nav a.on { color: #1A1A1A; font-weight: 600; }
+    .a nav a.on::before { content: "— "; color: #C41E3A; }
+    .a .progress-block { margin: 2.5rem 0; }
+    .a .progress-block .label {
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.625rem; letter-spacing: 0.2em;
+      color: #888; text-transform: uppercase;
+    }
+    .a .progress-block .bar {
+      margin-top: 0.75rem; height: 1px;
+      background: rgba(26,26,26,0.15);
+      position: relative;
+    }
+    .a .progress-block .bar i {
+      position: absolute; left: 0; top: -1px;
+      height: 3px; width: 38%; background: #C41E3A;
+    }
+    .a .progress-block .pct {
+      margin-top: 0.5rem;
+      font-family: "DM Sans", sans-serif;
+      font-size: 2.5rem; font-weight: 500;
+      letter-spacing: -0.04em;
+      font-variant-numeric: tabular-nums;
+    }
+    .a h2 {
+      font-size: 1.625rem; font-weight: 600;
+      letter-spacing: 0.02em; line-height: 1.45;
+    }
+    .a h2 span { color: #C41E3A; }
+    .a .sub {
+      margin-top: 0.75rem;
+      font-family: "DM Sans", sans-serif;
+      font-size: 0.875rem; color: #666; line-height: 1.7;
+    }
+    .a .stat-row div b { font-family: "DM Sans", sans-serif; font-weight: 600; }
+
+    /* ═══════════════════════════════════════
+       B · 铝壳座舱 — 暖灰 + 铜，大圆角壳体
+       参考：MBUX / iDrive 日间，非霓虹
+       ═══════════════════════════════════════ */
+    .b {
+      background: linear-gradient(165deg, #DDD6CC 0%, #C8BFB2 40%, #B8AFA3 100%);
+      color: #2C2416;
+      font-family: "Instrument Sans", sans-serif;
+      padding: 2rem;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .b .cockpit {
+      width: min(920px, 100%);
+      background: linear-gradient(145deg, #F2EDE6 0%, #E8E2D9 50%, #DFD8CE 100%);
+      border-radius: 32px;
+      padding: 2px;
+      box-shadow:
+        0 2px 0 rgba(255,255,255,0.6) inset,
+        0 24px 80px rgba(44,36,22,0.18),
+        0 4px 16px rgba(44,36,22,0.08);
+    }
+    .b .inner {
+      border-radius: 30px;
+      background: #EDE8E0;
+      padding: 1.75rem 2rem 2rem;
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 2rem;
+    }
+    .b .pill-nav {
+      display: flex; flex-direction: column; gap: 0.35rem;
+    }
+    .b .pill-nav a {
+      padding: 0.55rem 1rem;
+      border-radius: 999px;
+      font-size: 0.8125rem; color: #6B5E4E;
+      text-decoration: none; transition: 0.2s;
+    }
+    .b .pill-nav a.on {
+      background: #2C2416; color: #F2EDE6;
+    }
+    .b .gauge-row {
+      display: flex; align-items: center; gap: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .b .gauge {
+      width: 88px; height: 88px; flex-shrink: 0;
+      border-radius: 50%;
+      background: conic-gradient(#B87333 0 38%, #D4C8BA 38% 100%);
+      display: grid; place-items: center;
+      box-shadow: 0 4px 12px rgba(44,36,22,0.12);
+    }
+    .b .gauge span {
+      width: 64px; height: 64px; border-radius: 50%;
+      background: #EDE8E0;
+      display: grid; place-items: center;
+      font-size: 1.125rem; font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      color: #2C2416;
+    }
+    .b h2 {
+      font-size: 1.375rem; font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .b .sub { font-size: 0.8125rem; color: #6B5E4E; margin-top: 0.35rem; line-height: 1.55; }
+    .b .track {
+      margin-top: 1.25rem; height: 6px;
+      background: #D4C8BA; border-radius: 999px; overflow: hidden;
+    }
+    .b .track i {
+      display: block; height: 100%; width: 38%;
+      background: linear-gradient(90deg, #8B5A2B, #B87333);
+      border-radius: 999px;
+    }
+    .b .stat-row div b { color: #2C2416; }
+    .b .accent { color: #B87333; }
+
+    /* ═══════════════════════════════════════
+       C · 信息建筑 — 白底直角，零装饰
+       色：白 / 海军蓝 accent
+       ═══════════════════════════════════════ */
+    .c {
+      background: #FFFFFF;
+      color: #0F172A;
+      font-family: Inter, sans-serif;
+    }
+    .c .bar {
+      border-bottom: 1px solid #E2E8F0;
+      padding: 0.75rem 2rem;
+      display: flex; align-items: center; gap: 2rem;
+      font-size: 0.8125rem;
+    }
+    .c .bar strong { font-weight: 600; letter-spacing: -0.02em; }
+    .c .bar nav { display: flex; gap: 1.5rem; margin-left: auto; }
+    .c .bar nav a {
+      color: #64748B; text-decoration: none; font-weight: 500;
+    }
+    .c .bar nav a.on { color: #0F172A; border-bottom: 2px solid #1E3A5F; padding-bottom: 0.75rem; margin-bottom: -0.75rem; }
+    .c .main {
+      max-width: 880px; margin: 0 auto;
+      padding: 3rem 2rem;
+    }
+    .c .step {
+      font-size: 0.6875rem; font-weight: 600;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: #1E3A5F;
+    }
+    .c h2 {
+      margin-top: 0.5rem;
+      font-size: 2rem; font-weight: 600;
+      letter-spacing: -0.035em;
+    }
+    .c .sub { margin-top: 0.5rem; color: #64748B; font-size: 0.9375rem; }
+    .c .grid-progress {
+      margin: 2.5rem 0;
+      display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px;
+    }
+    .c .grid-progress span {
+      height: 8px; background: #E2E8F0;
+    }
+    .c .grid-progress span.on { background: #1E3A5F; }
+    .c .meta-line {
+      display: flex; justify-content: space-between;
+      font-size: 0.8125rem; color: #64748B;
+      font-variant-numeric: tabular-nums;
+    }
+    .c .stat-row {
+      border-top: 1px solid #E2E8F0;
+      padding-top: 1.5rem; margin-top: 2rem;
+    }
+    .c .stat-row div b { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.03em; }
+
+    /* ═══════════════════════════════════════
+       D · 深绿控台 — 赛车仪表，黄铜 accent
+       形态：弧形表盘，非 HUD 框
+       ═══════════════════════════════════════ */
+    .d {
+      background: #061510;
+      color: #F5E6C8;
+      font-family: "Libre Baskerville", "Noto Serif SC", serif;
+      padding: 2rem;
+      display: flex; align-items: center; justify-content: center;
+      min-height: calc(100dvh - 130px);
+    }
+    .d .panel {
+      width: min(900px, 100%);
+      background: linear-gradient(180deg, #0B2818 0%, #071A10 100%);
+      border: 1px solid rgba(212,175,55,0.15);
+      padding: 2rem 2.5rem 2.25rem;
+      position: relative;
+    }
+    .d .panel::before {
+      content: "";
+      position: absolute; top: 0; left: 2rem; right: 2rem; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(212,175,55,0.4), transparent);
+    }
+    .d .header {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-bottom: 2rem;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.6875rem; letter-spacing: 0.06em;
+      color: rgba(245,230,200,0.45);
+    }
+    .d .dial-wrap {
+      display: flex; gap: 2.5rem; align-items: flex-end;
+    }
+    .d .dial {
+      flex-shrink: 0; width: 200px;
+    }
+    .d .dial svg { width: 100%; display: block; }
+    .d .dial .num {
+      text-align: center; margin-top: -1.5rem;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 2rem; color: #D4AF37;
+      font-variant-numeric: tabular-nums;
+    }
+    .d h2 {
+      font-size: 1.5rem; font-weight: 400;
+      line-height: 1.4; margin-bottom: 0.5rem;
+    }
+    .d h2 em { font-style: italic; color: #D4AF37; }
+    .d .sub {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.75rem; color: rgba(245,230,200,0.5);
+      line-height: 1.6;
+    }
+    .d nav {
+      display: flex; gap: 1.25rem; margin-top: 2rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid rgba(212,175,55,0.1);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.6875rem;
+    }
+    .d nav a { color: rgba(245,230,200,0.35); text-decoration: none; }
+    .d nav a.on { color: #D4AF37; }
+    .d .stat-row div b { color: #F5E6C8; font-family: "JetBrains Mono", monospace; font-size: 1.25rem; }
+
+    /* ═══════════════════════════════════════
+       E · 砂岩流态 — 暖色水滴，非航空青
+       形态：有机曲线 + 沙色
+       ═══════════════════════════════════════ */
+    .e {
+      background: #EDE6DA;
+      color: #3D2914;
+      font-family: "Source Sans 3", sans-serif;
+      padding: 2rem 1.5rem 3rem;
+      overflow: hidden;
+    }
+    .e .blob-bg {
+      position: absolute; inset: 0; pointer-events: none; opacity: 0.35;
+    }
+    .e .wrap {
+      position: relative; z-index: 1;
+      max-width: 920px; margin: 0 auto;
+    }
+    .e .drop-shell {
+      background: #F5F0E6;
+      padding: 2.5rem 2.75rem 2rem;
+      clip-path: path("M 0 80 Q 0 0 120 0 L calc(100% - 80px) 0 Q 100% 0 100% 60 Q 100% 100% calc(100% - 40px) 100% L 40 100% Q 0 100% 0 80 Z");
+      border-radius: 0 80px 60px 40px;
+      box-shadow: 0 20px 60px rgba(61,41,20,0.08);
+    }
+    @supports (clip-path: path("M0 0")) {
+      .e .drop-shell { border-radius: 0; }
+    }
+    .e .flow-lines {
+      position: absolute; right: -20px; top: 10%; width: 45%; height: 80%;
+      opacity: 0.12;
+    }
+    .e .top-row {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      margin-bottom: 2rem;
+    }
+    .e .logo {
+      font-family: Fraunces, serif;
+      font-size: 1rem; font-weight: 600; letter-spacing: -0.02em;
+      color: #7BA38B;
+    }
+    .e .tabs-e {
+      display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end;
+    }
+    .e .tabs-e a {
+      font-size: 0.75rem; padding: 0.35rem 0.85rem;
+      border-radius: 999px; text-decoration: none;
+      color: #8B7355; background: rgba(123,163,139,0.12);
+    }
+    .e .tabs-e a.on {
+      background: #E07A4A; color: #FFF;
+    }
+    .e .river-progress {
+      margin-bottom: 1.75rem;
+    }
+    .e .river-progress svg { width: 100%; height: 56px; display: block; }
+    .e h2 {
+      font-family: Fraunces, serif;
+      font-size: 1.75rem; font-weight: 600;
+      letter-spacing: -0.03em; line-height: 1.25;
+    }
+    .e h2 em { font-style: normal; color: #E07A4A; }
+    .e .sub { margin-top: 0.5rem; font-size: 0.875rem; color: #8B7355; line-height: 1.6; }
+    .e .stat-row div b {
+      font-family: Fraunces, serif;
+      font-size: 1.5rem; color: #3D2914;
+    }
+    .e .stat-row div label { color: #7BA38B; }
+
+    .tag {
+      display: inline-block; margin-top: 1.5rem;
+      font-size: 0.625rem; letter-spacing: 0.06em;
+      padding: 0.35rem 0.65rem;
+      border: 1px solid currentColor;
+      opacity: 0.45;
+    }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <h1>之前确实只会一套：深色底 + 冰蓝 accent + 航空曲线</h1>
+    <p class="note">
+      下面五屏是<strong>同一功能</strong>（分析运行 · 38%），但
+      <em>配色、字体、形态、参考系</em>刻意互斥。
+      没有 <span class="rut">#030508 / #64c8e6 / Outfit / 风洞 HUD</span>。
+      请按「像不像你要的专业审计工具」选，而不是选「哪张更酷」。
+    </p>
+    <div class="picker">
+      <button type="button" class="on" data-scene="a">A 纸面审计 · 米纸墨朱 · 零曲线</button>
+      <button type="button" data-scene="b">B 铝壳座舱 · 暖灰铜 · 大圆角壳</button>
+      <button type="button" data-scene="c">C 信息建筑 · 白底海军蓝 · 直角网格</button>
+      <button type="button" data-scene="d">D 深绿表盘 · 黄铜弧 · 经典仪表</button>
+      <button type="button" data-scene="e">E 砂岩流态 · 陶土珊瑚 · 有机水滴</button>
+    </div>
+  </header>
+
+  <!-- A -->
+  <section class="scene a on" id="a">
+    <div class="frame">
+      <div class="top">
+        <div>
+          <div class="mark"></div>
+          <div class="crumb">唐山会议 / A1P260307357</div>
+        </div>
+        <nav>
+          <a href="#">总览</a>
+          <a href="#" class="on">分析运行</a>
+          <a href="#">资料</a>
+          <a href="#">Finding</a>
+          <a href="#">交付</a>
+        </nav>
+      </div>
+      <div class="progress-block">
+        <div class="label">解析文档</div>
+        <div class="bar"><i></i></div>
+        <div class="pct">38%</div>
+      </div>
+      <h2>正在<span>解析</span>观察资料</h2>
+      <p class="sub">OCR 与结构化抽取 · 第 12 / 30 份 · Remote_A1P260307357_线上截图 (6).jpg</p>
+      <div class="stat-row">
+        <div><label>资料</label><b>30</b></div>
+        <div><label>Finding</label><b>0</b></div>
+        <div><label>交付物</label><b>0</b></div>
+      </div>
+      <span class="tag">参考：原研哉 / 账本横线 / 印刷排版</span>
+    </div>
+  </section>
+
+  <!-- B -->
+  <section class="scene b" id="b">
+    <div class="cockpit">
+      <div class="inner">
+        <nav class="pill-nav">
+          <a href="#">总览</a>
+          <a href="#" class="on">分析运行</a>
+          <a href="#">资料</a>
+          <a href="#">Finding</a>
+          <a href="#">交付</a>
+        </nav>
+        <div>
+          <div class="crumb">唐山会议 / A1P260307357</div>
+          <div class="gauge-row">
+            <div class="gauge"><span>38</span></div>
+            <div>
+              <h2>正在解析观察资料</h2>
+              <p class="sub">OCR 与结构化抽取 · 12 / 30 份</p>
+            </div>
+          </div>
+          <div class="track"><i></i></div>
+          <p class="sub" style="margin-top:0.75rem">Remote_A1P260307357_线上截图 (6).jpg</p>
+          <div class="stat-row">
+            <div><label>资料</label><b>30</b></div>
+            <div><label>Finding</label><b>0</b></div>
+            <div><label>交付</label><b class="accent">0</b></div>
+          </div>
+          <span class="tag" style="border-color:#B87333;color:#B87333">参考：MBUX / Braun / 暖色 HMI</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- C -->
+  <section class="scene c" id="c">
+    <div class="bar">
+      <strong>AuditAgent</strong>
+      <span class="crumb" style="opacity:1;color:#64748B">唐山会议 · A1P260307357</span>
+      <nav>
+        <a href="#">总览</a>
+        <a href="#" class="on">分析运行</a>
+        <a href="#">资料</a>
+        <a href="#">Finding</a>
+        <a href="#">交付</a>
+      </nav>
+    </div>
+    <div class="main">
+      <div class="step">Step 05 · Parse</div>
+      <h2>解析文档</h2>
+      <p class="sub">OCR 与结构化抽取 · 第 12 / 30 份</p>
+      <div class="grid-progress" aria-hidden="true">
+        <span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="meta-line"><span>Remote_A1P260307357_线上截图 (6).jpg</span><span>38%</span></div>
+      <div class="stat-row">
+        <div><label>资料</label><b>30</b></div>
+        <div><label>Finding</label><b>0</b></div>
+        <div><label>交付物</label><b>0</b></div>
+      </div>
+      <span class="tag" style="border-color:#1E3A5F;color:#1E3A5F">参考：Pentagram / Linear 式信息密度</span>
+    </div>
+  </section>
+
+  <!-- D -->
+  <section class="scene d" id="d">
+    <div class="panel">
+      <div class="header">
+        <span>唐山会议 / A1P260307357</span>
+        <span>PARSE · RUNNING</span>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial">
+          <svg viewBox="0 0 200 120">
+            <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="rgba(212,175,55,0.12)" stroke-width="8" stroke-linecap="round"/>
+            <path d="M 20 100 A 80 80 0 0 1 88 36" fill="none" stroke="#D4AF37" stroke-width="8" stroke-linecap="round"/>
+            <line x1="100" y1="100" x2="88" y2="36" stroke="#D4AF37" stroke-width="2"/>
+            <circle cx="100" cy="100" r="4" fill="#D4AF37"/>
+          </svg>
+          <div class="num">38%</div>
+        </div>
+        <div>
+          <h2>正在<em>解析</em>观察资料</h2>
+          <p class="sub">OCR · 12 / 30 · Remote_A1P260307357_线上截图 (6).jpg</p>
+          <div class="stat-row" style="margin-top:1.5rem">
+            <div><label>资料</label><b>30</b></div>
+            <div><label>Finding</label><b>0</b></div>
+            <div><label>交付</label><b>0</b></div>
+          </div>
+        </div>
+      </div>
+      <nav>
+        <a href="#">总览</a>
+        <a href="#" class="on">分析运行</a>
+        <a href="#">资料</a>
+        <a href="#">Finding</a>
+        <a href="#">交付</a>
+      </nav>
+      <span class="tag" style="border-color:#D4AF37;color:#D4AF37;margin-top:1.25rem;display:inline-block">参考：阿斯顿 / 经典仪表 · 非赛博</span>
+    </div>
+  </section>
+
+  <!-- E -->
+  <section class="scene e" id="e">
+    <svg class="blob-bg" viewBox="0 0 400 800" preserveAspectRatio="xMaxYMid slice" style="position:fixed;right:0;top:130px;width:50%;height:calc(100% - 130px)">
+      <path d="M0 200 Q120 180 200 220 T400 200 T400 400 Q280 420 200 380 T0 400 T0 600 Q120 620 200 580 T400 600" fill="none" stroke="#7BA38B" stroke-width="1.5"/>
+      <path d="M0 280 Q140 260 220 300 T400 280 T400 480 Q260 500 180 460 T0 480" fill="none" stroke="#E07A4A" stroke-width="1"/>
+    </svg>
+    <div class="wrap">
+      <div class="drop-shell" style="position:relative">
+        <svg class="flow-lines" viewBox="0 0 200 300" preserveAspectRatio="none">
+          <path d="M0 50 Q80 40 160 55 T200 50" fill="none" stroke="#7BA38B" stroke-width="2"/>
+          <path d="M0 100 Q90 85 180 100 T200 95" fill="none" stroke="#7BA38B" stroke-width="1.5"/>
+          <path d="M0 150 Q100 130 200 145" fill="none" stroke="#E07A4A" stroke-width="2"/>
+          <path d="M0 200 Q70 190 160 205 T200 200" fill="none" stroke="#7BA38B" stroke-width="1"/>
+        </svg>
+        <div class="top-row">
+          <div class="logo">AuditAgent</div>
+          <div class="tabs-e">
+            <a href="#">总览</a>
+            <a href="#" class="on">分析</a>
+            <a href="#">资料</a>
+            <a href="#">Finding</a>
+            <a href="#">交付</a>
+          </div>
+        </div>
+        <div class="crumb">唐山会议 / A1P260307357</div>
+        <div class="river-progress">
+          <svg viewBox="0 0 600 56" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="river" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#C4693A"/>
+                <stop offset="100%" stop-color="#E07A4A"/>
+              </linearGradient>
+            </defs>
+            <path d="M0 28 C0 8 40 4 300 8 C560 12 600 16 600 28 C600 40 560 44 300 48 C40 52 0 48 0 28 Z" fill="rgba(123,163,139,0.15)"/>
+            <path d="M0 28 C0 12 30 10 228 12 C228 12 228 44 30 44 C0 44 0 28 0 28 Z" fill="url(#river)"/>
+          </svg>
+        </div>
+        <h2>解析文档 · <em>38%</em></h2>
+        <p class="sub">OCR 与结构化抽取 · 第 12 / 30 份 · Remote_A1P260307357_线上截图 (6).jpg</p>
+        <div class="stat-row">
+          <div><label>资料</label><b>30</b></div>
+          <div><label>Finding</label><b>0</b></div>
+          <div><label>交付物</label><b>0</b></div>
+        </div>
+        <span class="tag" style="border-color:#E07A4A;color:#E07A4A">参考：河流层理 / 陶瓷釉 · 暖色流线</span>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    document.querySelectorAll(".picker button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".picker button").forEach((b) => b.classList.remove("on"));
+        document.querySelectorAll(".scene").forEach((s) => s.classList.remove("on"));
+        btn.classList.add("on");
+        document.getElementById(btn.dataset.scene).classList.add("on");
+      });
+    });
+  </script>
+</body>
+</html>

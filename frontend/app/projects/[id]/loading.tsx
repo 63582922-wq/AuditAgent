@@ -1,10 +1,5 @@
-import { HudSkeleton, PageSkeleton } from "@/components/PageSkeleton";
+import { PageSkeleton } from "@/components/PageSkeleton";
 
 export default function ProjectLoading() {
-  return (
-    <>
-      <HudSkeleton />
-      <PageSkeleton lines={4} />
-    </>
-  );
+  return <PageSkeleton lines={5} />;
 }

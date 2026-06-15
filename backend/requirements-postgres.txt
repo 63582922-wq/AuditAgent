@@ -1,0 +1,2 @@
+# Docker / PostgreSQL 部署时额外安装
+psycopg2-binary==2.9.10

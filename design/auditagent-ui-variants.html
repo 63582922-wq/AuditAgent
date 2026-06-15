@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AuditAgent · 流线科技 UI 方向探索（3 变体）</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: "DM Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #05080d;
+      color: #e8eef4;
+      min-height: 100dvh;
+    }
+
+    /* ── 变体选择器 ── */
+    .picker {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.25rem;
+      padding: 0.85rem 1.5rem;
+      background: rgba(5, 8, 13, 0.92);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(148, 176, 210, 0.12);
+    }
+    .picker__title { font-size: 0.8125rem; color: #94a3b8; max-width: 280px; line-height: 1.4; }
+    .picker__title strong { color: #e8eef4; font-weight: 600; display: block; margin-bottom: 0.15rem; }
+    .picker__tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-left: auto; }
+    .picker__tab {
+      border: 1px solid rgba(148, 176, 210, 0.2);
+      background: transparent;
+      color: #94a3b8;
+      font: inherit;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      padding: 0.45rem 0.9rem;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.25s ease;
+    }
+    .picker__tab:hover { border-color: rgba(77, 184, 217, 0.5); color: #e8eef4; }
+    .picker__tab.is-active {
+      background: rgba(77, 184, 217, 0.12);
+      border-color: rgba(77, 184, 217, 0.45);
+      color: #7dd3fc;
+    }
+    .picker__note {
+      width: 100%;
+      font-size: 0.75rem;
+      color: #64748b;
+      padding-top: 0.25rem;
+    }
+
+    .variant { display: none; min-height: calc(100dvh - 72px); }
+    .variant.is-visible { display: block; }
+
+    /* ═══════════════════════════════════════
+       A · 航空流线 Aero Flow
+       ═══════════════════════════════════════ */
+    .v-a {
+      --bg: #060a10;
+      --panel: rgba(14, 20, 32, 0.72);
+      --line: rgba(148, 176, 210, 0.1);
+      --accent: #4db8d9;
+      --accent2: #6b8fd4;
+      --text: #e8eef4;
+      --muted: #94a3b8;
+      --side: 268px;
+      background: var(--bg);
+      color: var(--text);
+      position: relative;
+      overflow: hidden;
+    }
+    .v-a .flow-bg {
+      position: absolute; inset: 0; pointer-events: none; opacity: 0.55;
+    }
+    .v-a .shell { display: flex; min-height: calc(100dvh - 72px); position: relative; z-index: 1; }
+    .v-a .side {
+      width: var(--side); flex-shrink: 0;
+      border-right: 1px solid var(--line);
+      background: rgba(8, 12, 20, 0.88);
+      backdrop-filter: blur(20px);
+      display: flex; flex-direction: column;
+      padding: 1.25rem 0;
+    }
+    .v-a .brand {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0 1.15rem 1.25rem;
+      border-bottom: 1px solid var(--line);
+      text-decoration: none; color: inherit;
+    }
+    .v-a .brand__icon {
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 1px solid rgba(77, 184, 217, 0.35);
+      display: grid; place-items: center;
+      background: linear-gradient(145deg, rgba(77,184,217,0.15), transparent);
+    }
+    .v-a .brand__name { font-weight: 600; font-size: 0.875rem; letter-spacing: -0.02em; }
+    .v-a .brand__sub { font-size: 0.6875rem; color: var(--muted); margin-top: 0.1rem; }
+    .v-a .nav { padding: 1rem 0.75rem; display: flex; flex-direction: column; gap: 2px; }
+    .v-a .nav a {
+      padding: 0.5rem 0.75rem; border-radius: 8px;
+      font-size: 0.8125rem; color: var(--muted); text-decoration: none;
+      border-left: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .v-a .nav a.active { color: var(--accent); background: rgba(77,184,217,0.08); border-left-color: var(--accent); }
+    .v-a .rail { margin-top: auto; padding: 1rem 0.85rem; border-top: 1px solid var(--line); }
+    .v-a .crumb { font-size: 0.6875rem; color: var(--muted); line-height: 1.5; margin-bottom: 0.5rem; }
+    .v-a .crumb span { color: var(--text); font-weight: 500; }
+    .v-a .scope { font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: #64748b; margin-bottom: 0.5rem; }
+    .v-a .live-pill {
+      display: flex; align-items: center; gap: 0.4rem;
+      font-family: "IBM Plex Mono", monospace; font-size: 0.6875rem;
+      color: var(--accent); padding: 0.35rem 0.55rem;
+      border: 1px solid rgba(77,184,217,0.25); border-radius: 8px;
+      margin-bottom: 0.65rem;
+    }
+    .v-a .live-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    .v-a .tabs { display: flex; flex-direction: column; gap: 2px; }
+    .v-a .tabs a {
+      font-size: 0.8125rem; padding: 0.4rem 0.5rem; border-radius: 8px;
+      color: var(--muted); text-decoration: none; border-left: 2px solid transparent;
+    }
+    .v-a .tabs a.on { color: var(--text); background: rgba(77,184,217,0.08); border-left-color: var(--accent); }
+    .v-a .main { flex: 1; padding: 1.5rem 2rem 3rem; max-width: 920px; }
+    .v-a .strip {
+      border-radius: 14px; border: 1px solid rgba(77,184,217,0.22);
+      background: var(--panel); backdrop-filter: blur(12px);
+      padding: 0.85rem 1.1rem; margin-bottom: 1.25rem;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.35);
+    }
+    .v-a .strip h2 { font-size: 0.9375rem; font-weight: 600; letter-spacing: -0.02em; }
+    .v-a .strip p { font-size: 0.8125rem; color: var(--muted); margin-top: 0.25rem; }
+    .v-a .strip__bar { height: 3px; background: rgba(148,176,210,0.12); border-radius: 999px; margin-top: 0.65rem; overflow: hidden; }
+    .v-a .strip__bar span { display: block; height: 100%; width: 38%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 999px; }
+    .v-a .hud {
+      border-radius: 20px; border: 1px solid var(--line);
+      background: var(--panel); padding: 1.35rem;
+      margin-bottom: 1.25rem;
+      box-shadow: 0 4px 40px rgba(0,0,0,0.4);
+    }
+    .v-a .hud__row { display: flex; gap: 1.25rem; align-items: flex-start; }
+    .v-a .ring-wrap { position: relative; width: 80px; height: 80px; flex-shrink: 0; }
+    .v-a .ring-wrap svg { transform: rotate(-90deg); }
+    .v-a .ring-pct {
+      position: absolute; inset: 0; display: grid; place-items: center;
+      font-family: "IBM Plex Mono", monospace; font-size: 0.875rem; font-weight: 500; color: var(--accent);
+    }
+    .v-a .hud__label { font-size: 0.6875rem; color: var(--muted); padding: 0.15rem 0.5rem; border: 1px solid var(--line); border-radius: 999px; display: inline-block; margin-bottom: 0.35rem; }
+    .v-a .hud__step { font-size: 1.125rem; font-weight: 600; letter-spacing: -0.02em; }
+    .v-a .hud__msg { font-size: 0.8125rem; color: var(--muted); margin-top: 0.35rem; max-width: 420px; line-height: 1.55; }
+    .v-a .track { margin-top: 1.25rem; }
+    .v-a .track__line { height: 3px; background: rgba(148,176,210,0.1); border-radius: 999px; position: relative; }
+    .v-a .track__fill { position: absolute; left: 0; top: 0; height: 100%; width: 42%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 999px; }
+    .v-a .track__nodes { display: flex; justify-content: space-between; margin-top: 0.65rem; }
+    .v-a .track__nodes span { font-size: 0.625rem; color: #64748b; }
+    .v-a .track__nodes span.on { color: var(--accent); font-weight: 500; }
+    .v-a .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+    .v-a .metric {
+      border-radius: 14px; border: 1px solid var(--line);
+      background: rgba(12, 18, 28, 0.5); padding: 1rem 1.1rem;
+    }
+    .v-a .metric__label { font-size: 0.6875rem; color: var(--muted); }
+    .v-a .metric__val { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.03em; margin-top: 0.25rem; font-variant-numeric: tabular-nums; }
+    .v-a .metric__unit { font-size: 0.75rem; color: var(--muted); margin-left: 0.25rem; font-weight: 400; }
+
+    /* ═══════════════════════════════════════
+       B · 地平线 Horizon Clarity (浅色)
+       ═══════════════════════════════════════ */
+    .v-b {
+      --bg: #eef2f7;
+      --panel: #ffffff;
+      --line: rgba(15, 40, 70, 0.08);
+      --accent: #1565a8;
+      --text: #0f172a;
+      --muted: #475569;
+      --side: 260px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .v-b .shell { display: flex; min-height: calc(100dvh - 72px); }
+    .v-b .side {
+      width: var(--side); background: var(--panel);
+      border-right: 1px solid var(--line);
+      box-shadow: 4px 0 24px rgba(15, 40, 70, 0.04);
+      display: flex; flex-direction: column;
+    }
+    .v-b .brand { padding: 1.35rem 1.25rem; border-bottom: 1px solid var(--line); }
+    .v-b .brand__row { display: flex; align-items: center; gap: 0.65rem; }
+    .v-b .brand__mark {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: var(--accent); color: #fff;
+      display: grid; place-items: center; font-size: 0.65rem; font-weight: 700;
+    }
+    .v-b .brand__name { font-weight: 600; font-size: 0.9375rem; }
+    .v-b .brand__sub { font-size: 0.6875rem; color: var(--muted); margin-top: 0.15rem; }
+    .v-b .nav { padding: 0.75rem; }
+    .v-b .nav a {
+      display: block; padding: 0.55rem 0.75rem; border-radius: 10px;
+      font-size: 0.8125rem; color: var(--muted); text-decoration: none; margin-bottom: 2px;
+    }
+    .v-b .nav a.active { background: rgba(21, 101, 168, 0.08); color: var(--accent); font-weight: 500; }
+    .v-b .rail { margin-top: auto; padding: 1rem; background: #f8fafc; border-top: 1px solid var(--line); }
+    .v-b .crumb { font-size: 0.75rem; color: var(--muted); }
+    .v-b .main { flex: 1; padding: 2rem 2.5rem; max-width: 960px; }
+    .v-b .page-title { font-size: 1.625rem; font-weight: 600; letter-spacing: -0.03em; }
+    .v-b .page-desc { color: var(--muted); font-size: 0.875rem; margin-top: 0.35rem; margin-bottom: 1.75rem; }
+    .v-b .status-card {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 16px; padding: 1.25rem 1.5rem;
+      margin-bottom: 1.25rem;
+      display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: center;
+    }
+    .v-b .status-card h3 { font-size: 0.9375rem; font-weight: 600; }
+    .v-b .status-card p { font-size: 0.8125rem; color: var(--muted); margin-top: 0.2rem; }
+    .v-b .progress-ring {
+      width: 64px; height: 64px; position: relative;
+    }
+    .v-b .progress-ring span {
+      position: absolute; inset: 0; display: grid; place-items: center;
+      font-family: "IBM Plex Mono", monospace; font-size: 0.8125rem; font-weight: 500; color: var(--accent);
+    }
+    .v-b .steps {
+      display: flex; gap: 0; margin-bottom: 1.5rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .v-b .steps span {
+      padding: 0.65rem 1rem; font-size: 0.8125rem; color: var(--muted);
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    .v-b .steps span.done { color: var(--text); }
+    .v-b .steps span.cur { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+    .v-b .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .v-b .card {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 12px; padding: 1.15rem;
+    }
+    .v-b .card__k { font-size: 0.6875rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .v-b .card__v { font-size: 1.5rem; font-weight: 600; margin-top: 0.35rem; font-variant-numeric: tabular-nums; }
+
+    /* ═══════════════════════════════════════
+       C · 深流控 Deep Stream
+       ═══════════════════════════════════════ */
+    .v-c {
+      --bg: #070b14;
+      --panel: rgba(10, 16, 28, 0.85);
+      --accent: #22d3ee;
+      --accent-end: #818cf8;
+      --text: #f1f5f9;
+      --muted: #8892a4;
+      --side: 272px;
+      background: var(--bg);
+      color: var(--text);
+      position: relative;
+    }
+    .v-c::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(ellipse 80% 50% at 70% -10%, rgba(34, 211, 238, 0.08), transparent),
+        radial-gradient(ellipse 60% 40% at 10% 100%, rgba(129, 140, 248, 0.06), transparent);
+    }
+    .v-c .shell { display: flex; min-height: calc(100dvh - 72px); position: relative; z-index: 1; }
+    .v-c .side {
+      width: var(--side);
+      background: linear-gradient(180deg, rgba(12, 18, 30, 0.95), rgba(7, 11, 20, 0.98));
+      border-right: 1px solid rgba(34, 211, 238, 0.08);
+      display: flex; flex-direction: column;
+    }
+    .v-c .brand {
+      padding: 1.25rem; display: flex; align-items: center; gap: 0.75rem;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .v-c .brand svg { flex-shrink: 0; }
+    .v-c .brand strong { display: block; font-size: 0.8125rem; letter-spacing: 0.12em; text-transform: uppercase; }
+    .v-c .brand small { font-size: 0.625rem; color: var(--muted); letter-spacing: 0.04em; }
+    .v-c .main { flex: 1; padding: 1.25rem 1.75rem 2.5rem; }
+    .v-c .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;
+    }
+    .v-c .topbar h1 { font-size: 1.125rem; font-weight: 600; letter-spacing: -0.02em; }
+    .v-c .topbar .meta { font-family: "IBM Plex Mono", monospace; font-size: 0.6875rem; color: var(--accent); }
+    .v-c .console {
+      border-radius: 16px;
+      border: 1px solid rgba(34, 211, 238, 0.12);
+      background: var(--panel);
+      overflow: hidden;
+      margin-bottom: 1rem;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.03) inset, 0 20px 50px rgba(0,0,0,0.45);
+    }
+    .v-c .console__head {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.55rem 1rem;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      font-size: 0.6875rem; color: var(--muted);
+    }
+    .v-c .console__dots i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; background: #334155; }
+    .v-c .console__body { display: grid; grid-template-columns: 100px 1fr; gap: 1.25rem; padding: 1.25rem 1.5rem; align-items: center; }
+    .v-c .arc { width: 100px; height: 100px; position: relative; }
+    .v-c .arc__num {
+      position: absolute; inset: 0; display: grid; place-items: center;
+      font-family: "IBM Plex Mono", monospace; font-size: 1.125rem; font-weight: 500;
+      background: linear-gradient(135deg, var(--accent), var(--accent-end));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .v-c .console__text .tag { font-size: 0.625rem; color: var(--muted); letter-spacing: 0.08em; }
+    .v-c .console__text h2 { font-size: 1rem; font-weight: 600; margin-top: 0.25rem; }
+    .v-c .console__text p { font-size: 0.8125rem; color: var(--muted); margin-top: 0.35rem; line-height: 1.5; }
+    .v-c .flow-steps {
+      display: flex; gap: 0.35rem; padding: 0 1.5rem 1.25rem; overflow-x: auto;
+    }
+    .v-c .flow-steps span {
+      flex-shrink: 0; font-size: 0.625rem; padding: 0.3rem 0.55rem;
+      border-radius: 6px; color: var(--muted);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .v-c .flow-steps span.on {
+      color: var(--accent); border-color: rgba(34,211,238,0.35);
+      background: rgba(34,211,238,0.06);
+    }
+    .v-c .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.65rem; }
+    .v-c .stat {
+      border-radius: 12px; padding: 0.85rem 1rem;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .v-c .stat label { font-size: 0.625rem; color: var(--muted); letter-spacing: 0.06em; }
+    .v-c .stat b { display: block; font-size: 1.375rem; font-weight: 600; margin-top: 0.2rem; font-variant-numeric: tabular-nums; }
+
+    @media (max-width: 900px) {
+      .v-a .side, .v-b .side, .v-c .side { display: none; }
+      .v-a .main, .v-b .main, .v-c .main { padding: 1rem; }
+      .v-a .metrics, .v-b .grid3, .v-c .stats { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <!-- huashu-design · Junior 假设：子会议分析运行态 · 流线科技 · 3 变体待选 -->
+  <header class="picker">
+    <div class="picker__title">
+      <strong>AuditAgent UI 方向探索</strong>
+      同一信息架构 · 三种流线科技视觉 · 选定后再改 React 代码
+    </div>
+    <div class="picker__tabs" role="tablist">
+      <button type="button" class="picker__tab is-active" data-variant="a" role="tab">A · 航空流线</button>
+      <button type="button" class="picker__tab" data-variant="b" role="tab">B · 地平线清晰</button>
+      <button type="button" class="picker__tab" data-variant="c" role="tab">C · 深流控制台</button>
+    </div>
+    <p class="picker__note">模拟场景：唐山会议 · A1P260307357 · 解析中 38% · 30 份资料</p>
+  </header>
+
+  <!-- ═══ A · Aero Flow ═══ -->
+  <section class="variant v-a is-visible" id="variant-a" role="tabpanel">
+    <svg class="flow-bg" viewBox="0 0 1440 800" preserveAspectRatio="xMidYMid slice">
+      <defs>
+        <linearGradient id="ga" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="rgba(77,184,217,0)" />
+          <stop offset="50%" stop-color="rgba(77,184,217,0.25)" />
+          <stop offset="100%" stop-color="rgba(77,184,217,0)" />
+        </linearGradient>
+      </defs>
+      <path d="M-100 380 Q400 340 720 360 T1540 350" fill="none" stroke="url(#ga)" stroke-width="1" opacity="0.7"/>
+      <path d="M-80 480 Q380 440 760 470 T1560 450" fill="none" stroke="url(#ga)" stroke-width="0.75" opacity="0.35"/>
+    </svg>
+    <div class="shell">
+      <aside class="side">
+        <a class="brand" href="#">
+          <div class="brand__icon">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2 9c2.5-4 5-5 7-5s4.5 1 7 5c-2 3.5-4.5 4.5-7 4.5S4.5 12.5 2 9z" stroke="#4db8d9" stroke-width="1.2"/><circle cx="9" cy="9" r="2" fill="#4db8d9" opacity="0.85"/></svg>
+          </div>
+          <div><div class="brand__name">AuditAgent</div><div class="brand__sub">远程会议合规分析</div></div>
+        </a>
+        <nav class="nav">
+          <a href="#">总览</a>
+          <a href="#" class="active">观察案件</a>
+          <a href="#">合规规则</a>
+          <a href="#">记忆</a>
+        </nav>
+        <div class="rail">
+          <div class="crumb">观察案件 / <span>唐山会议</span> / A1P260307357</div>
+          <div class="scope">子会议</div>
+          <div class="live-pill"><i></i>解析 · 38%</div>
+          <div class="tabs">
+            <a href="#" class="on">概览</a>
+            <a href="#">资料</a>
+            <a href="#">Finding</a>
+            <a href="#">交付验收</a>
+            <a href="#">日志</a>
+          </div>
+        </div>
+      </aside>
+      <main class="main">
+        <div class="strip">
+          <h2>正在 · 解析文档</h2>
+          <p>OCR 与结构化抽取 · Remote_A1P260307357_线上截图 (6).jpg</p>
+          <div class="strip__bar"><span></span></div>
+        </div>
+        <div class="hud">
+          <div class="hud__row">
+            <div class="ring-wrap">
+              <svg width="80" height="80" viewBox="0 0 80 80">
+                <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(148,176,210,0.15)" stroke-width="3"/>
+                <circle cx="40" cy="40" r="34" fill="none" stroke="url(#ga)" stroke-width="3" stroke-linecap="round"
+                  stroke-dasharray="213" stroke-dashoffset="132"/>
+              </svg>
+              <span class="ring-pct">38%</span>
+            </div>
+            <div>
+              <span class="hud__label">分析引擎</span>
+              <div class="hud__step">解析</div>
+              <p class="hud__msg">逐页阅读资料，提取会议编码、时长与讲者信息。</p>
+            </div>
+          </div>
+          <div class="track">
+            <div class="track__line"><div class="track__fill"></div></div>
+            <div class="track__nodes">
+              <span>创建</span><span>入库</span><span>拆解</span><span>分类</span>
+              <span class="on">解析</span><span>抽取</span><span>规则</span><span>交付</span>
+            </div>
+          </div>
+        </div>
+        <div class="metrics">
+          <div class="metric"><div class="metric__label">资料</div><div class="metric__val">30<span class="metric__unit">份</span></div></div>
+          <div class="metric"><div class="metric__label">Finding</div><div class="metric__val">0<span class="metric__unit">条</span></div></div>
+          <div class="metric"><div class="metric__label">交付物</div><div class="metric__val">0<span class="metric__unit">个</span></div></div>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ═══ B · Horizon Clarity ═══ -->
+  <section class="variant v-b" id="variant-b" role="tabpanel" hidden>
+    <div class="shell">
+      <aside class="side">
+        <div class="brand">
+          <div class="brand__row">
+            <div class="brand__mark">AA</div>
+            <div><div class="brand__name">AuditAgent</div><div class="brand__sub">会议合规远程观察</div></div>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="#">总览</a>
+          <a href="#" class="active">观察案件</a>
+          <a href="#">合规规则</a>
+          <a href="#">记忆</a>
+        </nav>
+        <div class="rail">
+          <div class="crumb">唐山会议 / A1P260307357</div>
+        </div>
+      </aside>
+      <main class="main">
+        <h1 class="page-title">A1P260307357</h1>
+        <p class="page-desc">单场会议合规审查 · 资料 → 分析 → Finding → 交付验收</p>
+        <div class="status-card">
+          <div>
+            <h3>合规分析进行中</h3>
+            <p>当前步骤：解析文档 · 第 12 / 30 份资料</p>
+          </div>
+          <div class="progress-ring">
+            <svg width="64" height="64" viewBox="0 0 64 64" style="transform:rotate(-90deg)">
+              <circle cx="32" cy="32" r="28" fill="none" stroke="#e2e8f0" stroke-width="4"/>
+              <circle cx="32" cy="32" r="28" fill="none" stroke="#1565a8" stroke-width="4" stroke-linecap="round"
+                stroke-dasharray="176" stroke-dashoffset="109"/>
+            </svg>
+            <span>38%</span>
+          </div>
+        </div>
+        <div class="steps">
+          <span class="done">准备</span>
+          <span class="done">接入</span>
+          <span class="cur">分析</span>
+          <span>交付</span>
+        </div>
+        <div class="grid3">
+          <div class="card"><div class="card__k">资料</div><div class="card__v">30</div></div>
+          <div class="card"><div class="card__k">Finding</div><div class="card__v">0</div></div>
+          <div class="card"><div class="card__k">交付物</div><div class="card__v">0</div></div>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ═══ C · Deep Stream ═══ -->
+  <section class="variant v-c" id="variant-c" role="tabpanel" hidden>
+    <div class="shell">
+      <aside class="side">
+        <div class="brand">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <circle cx="14" cy="14" r="13" stroke="rgba(34,211,238,0.4)" stroke-width="1"/>
+            <path d="M6 14h16" stroke="url(#gc)" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="14" cy="14" r="3" fill="#22d3ee"/>
+            <defs><linearGradient id="gc" x1="6" y1="14" x2="22" y2="14"><stop stop-color="#22d3ee"/><stop offset="1" stop-color="#818cf8"/></linearGradient></defs>
+          </svg>
+          <div><strong>AuditAgent</strong><small>Compliance Stream</small></div>
+        </div>
+      </aside>
+      <main class="main">
+        <div class="topbar">
+          <h1>唐山会议 · A1P260307357</h1>
+          <span class="meta">STREAM · PARSING · 38%</span>
+        </div>
+        <div class="console">
+          <div class="console__head">
+            <span class="console__dots"><i></i><i></i><i></i></span>
+            分析引擎 · 运行中
+          </div>
+          <div class="console__body">
+            <div class="arc">
+              <svg width="100" height="100" viewBox="0 0 100 100" style="transform:rotate(-90deg)">
+                <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="4"/>
+                <circle cx="50" cy="50" r="42" fill="none" stroke="url(#gc)" stroke-width="4" stroke-linecap="round"
+                  stroke-dasharray="264" stroke-dashoffset="164"/>
+              </svg>
+              <span class="arc__num">38</span>
+            </div>
+            <div class="console__text">
+              <div class="tag">STEP 05 · PARSE</div>
+              <h2>解析文档</h2>
+              <p>读图推理中 · Remote_A1P260307357_20260506_线上截图 (6).jpg</p>
+            </div>
+          </div>
+          <div class="flow-steps">
+            <span>创建</span><span>入库</span><span>拆解</span><span>分类</span>
+            <span class="on">解析</span><span>抽取</span><span>规则</span><span>比对</span><span>交付</span>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat"><label>资料</label><b>30</b></div>
+          <div class="stat"><label>Finding</label><b>0</b></div>
+          <div class="stat"><label>交付物</label><b>0</b></div>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <script>
+    const tabs = document.querySelectorAll(".picker__tab");
+    const panels = document.querySelectorAll(".variant");
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const id = tab.dataset.variant;
+        tabs.forEach((t) => t.classList.toggle("is-active", t === tab));
+        panels.forEach((p) => {
+          const show = p.id === "variant-" + id;
+          p.classList.toggle("is-visible", show);
+          p.hidden = !show;
+        });
+      });
+    });
+  </script>
+</body>
+</html>

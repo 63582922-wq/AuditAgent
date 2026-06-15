@@ -16,7 +16,9 @@ from app.services.agent.workflow import (
     AgentWorkflow,
 )
 from app.services.anomaly_detector import detect_amount_anomalies
-from app.services.classifier import classify_document
+from app.services.agent.domain_classify import classify_uploaded_file
+from app.services.agent.modality_router import is_vision_file
+from app.services.parsers.parsed_doc_entries import flatten_parsed_docs
 from app.services.cross_checker import check_missing_documents, cross_check_amounts, detect_duplicate_invoices
 from app.services.cross_period_checker import detect_cross_period_risks, detect_three_way_gaps
 from app.services.entity_extractor import extract_entities_from_documents
@@ -27,12 +29,16 @@ import uuid
 from app.services.rule_engine import run_rules_on_fields, run_rules_on_rows
 
 
+from app.services.agent.meeting_scope import scoped_delete, scoped_query
+
+
 class PipelineExecutor:
     """内环步骤执行器，供 ReAct 外环逐步调度。"""
 
     EXECUTABLE_STEPS = frozenset(
         {
             "classifying",
+            "vision_parsing",
             "parsing",
             "extracting",
             "running_rules",
@@ -48,12 +54,14 @@ class PipelineExecutor:
         project_id: str,
         progress_callback: Optional[Callable[[str, int], None]] = None,
         trace: Optional[AgentTrace] = None,
+        meeting_id: Optional[str] = None,
     ):
         self.db = db
         self.project_id = project_id
+        self.meeting_id = meeting_id
         self.progress_callback = progress_callback
-        self.trace = trace or AgentTrace(db, project_id)
-        self.wf = AgentWorkflow(db, project_id, progress_callback)
+        self.trace = trace or AgentTrace(db, project_id, meeting_id)
+        self.wf = AgentWorkflow(db, project_id, progress_callback, meeting_id=meeting_id)
         self.state: Dict[str, Any] = {
             "completed_steps": set(),
             "agent_plan": {},
@@ -78,7 +86,7 @@ class PipelineExecutor:
         return p
 
     def bootstrap_planning(self) -> None:
-        files = self.db.query(FileRecord).filter_by(project_id=self.project_id).all()
+        files = scoped_query(self.db, FileRecord, self.project_id, self.meeting_id).all()
         agent_plan = plan_analysis(self.db, self.project_id, files)
         graph = ExecutionGraph.from_plan(agent_plan, files)
         self.trace.plan(agent_plan, graph.to_dict())
@@ -125,7 +133,7 @@ class PipelineExecutor:
             self.wf._set_status(project, "classifying")
             for f in files:
                 ext = Path(f.file_name).suffix.lower()
-                classification = classify_document(f.file_name, ext)
+                classification = classify_uploaded_file(f.file_name, ext)
                 f.file_type = classification["file_type"]
                 f.document_category = classification["document_category"]
                 f.confidence = classification["confidence"]
@@ -135,15 +143,26 @@ class PipelineExecutor:
             self.state["completed_steps"].add(step)
             return {"step": step, "file_count": len(files)}
 
+        if step == "vision_parsing":
+            from app.services.agent.vision_agent_runner import VisionAgentRunner
+
+            self.wf._set_status(project, "vision_parsing")
+            count = VisionAgentRunner.parse_vision_files(self, self.trace)
+            self.state["graph"] = ExecutionGraph.from_plan(self.state["agent_plan"], files)
+            self.state["completed_steps"].add(step)
+            return {"step": step, "vision_parsed": count}
+
         if step == "parsing":
-            parsed_docs: List[dict] = []
+            parsed_docs: List[dict] = list(self.state.get("parsed_docs") or [])
             self.wf._set_status(project, "parsing")
             for f in files:
+                if is_vision_file(f):
+                    continue
                 content = self.wf._parse_file(f)
                 headers = []
                 if content.get("sheets"):
                     headers = [c["name"] for c in content["sheets"][0].get("columns", [])]
-                reclassify = classify_document(
+                reclassify = classify_uploaded_file(
                     f.file_name, Path(f.file_name).suffix, headers=headers, text=content.get("text_content", "")
                 )
                 if reclassify["confidence"] > (f.confidence or 0):
@@ -152,6 +171,7 @@ class PipelineExecutor:
                     f.meta_json = reclassify
                 pd = ParsedDocument(
                     project_id=self.project_id,
+                    meeting_id=self.meeting_id,
                     file_id=f.id,
                     document_type=f.document_category,
                     content_json=content,
@@ -166,8 +186,10 @@ class PipelineExecutor:
                         "file_name": f.file_name,
                         "document_category": f.document_category,
                         "content_json": content,
+                        "text_content": content.get("text_content", ""),
                     }
                 )
+            parsed_docs = flatten_parsed_docs(parsed_docs)
             self.state["parsed_docs"] = parsed_docs
             self.state["graph"] = ExecutionGraph.from_plan(self.state["agent_plan"], files)
             self.state["completed_steps"].add(step)
@@ -177,13 +199,18 @@ class PipelineExecutor:
             parsed_docs = self.state["parsed_docs"]
             self.wf._set_status(project, "extracting")
             self.wf._progress("extracting")
-            self.db.query(ExtractedEntity).filter_by(project_id=self.project_id).delete()
-            self.db.query(RecordLink).filter_by(project_id=self.project_id).delete()
+            self.db.query(ExtractedEntity).filter_by(
+                project_id=self.project_id, meeting_id=self.meeting_id
+            ).delete()
+            self.db.query(RecordLink).filter_by(
+                project_id=self.project_id, meeting_id=self.meeting_id
+            ).delete()
             entities = extract_entities_from_documents(self.project_id, parsed_docs)
             for ent in entities:
                 self.db.add(
                     ExtractedEntity(
                         project_id=ent["project_id"],
+                        meeting_id=self.meeting_id,
                         file_id=ent["file_id"],
                         entity_type=ent["entity_type"],
                         entity_value=ent["entity_value"],
@@ -194,7 +221,8 @@ class PipelineExecutor:
                 )
             links = build_record_links(self.project_id, entities)
             for link in links:
-                self.db.add(RecordLink(**link))
+                payload = {**link, "meeting_id": self.meeting_id}
+                self.db.add(RecordLink(**payload))
             self.db.commit()
             self.state["entities"] = entities
             self.state["links"] = links
@@ -325,11 +353,12 @@ class PipelineExecutor:
             self.state["present"] = present
             self.state["missing"] = missing
 
-            self.db.query(Risk).filter_by(project_id=self.project_id).delete()
+            scoped_delete(self.db, Risk, self.project_id, self.meeting_id)
             for r in all_risks:
                 self.db.add(
                     Risk(
                         project_id=self.project_id,
+                        meeting_id=self.meeting_id,
                         risk_id=r.get("risk_id") or f"RISK-{uuid.uuid4().hex[:8]}",
                         risk_category=r["risk_category"],
                         risk_subcategory=r.get("risk_subcategory"),
@@ -384,7 +413,9 @@ class PipelineExecutor:
             missing = check_missing_documents(present)
 
         project.summary = self.wf._build_summary(all_risks, missing)
+        prior = dict(project.state_json or {})
         state_json: Dict[str, Any] = {
+            **prior,
             "agent_plan": self.state["agent_plan"],
             "execution_graph": graph.to_dict(),
             "missing_documents": missing,
@@ -395,7 +426,7 @@ class PipelineExecutor:
             "processed_file_ids": [f.id for f in files],
             "execution_mode": execution_mode,
             "completed_steps": sorted(self.state.get("completed_steps") or []),
-            "deliverable": {"status": "pending", "comment": ""},
+            "deliverable": prior.get("deliverable") or {"status": "pending", "comment": ""},
         }
         if mission:
             state_json["mission"] = mission

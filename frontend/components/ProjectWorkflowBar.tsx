@@ -3,63 +3,70 @@
 import dynamic from "next/dynamic";
 import { useProjectLive } from "@/contexts/ProjectLiveContext";
 import { HudSkeleton } from "@/components/PageSkeleton";
+import { CompactMissionBar } from "@/components/CompactMissionBar";
+import { pickHudAgents } from "@/lib/hud-agents";
+import { pickLiveAgentMessage } from "@/components/ActivityTimeline";
+import { isPipelineRunning } from "@/lib/workflow";
+import { buildWorkflowSteps } from "@/lib/i18n/workflow-steps";
+import { useI18n } from "@/lib/i18n";
+import { resolveLiveProgress } from "@/lib/workflow";
 
-const MissionControl = dynamic(
-  () => import("@/components/MissionControl").then((m) => ({ default: m.MissionControl })),
-  { loading: () => <div className="hud-skeleton__body" style={{ minHeight: 48 }} /> }
+const PipelineHud = dynamic(
+  () => import("@/components/PipelineHud").then((m) => ({ default: m.PipelineHud })),
+  { loading: () => <div className="hud-skeleton__body" style={{ minHeight: 420 }} /> }
 );
 
-const CyberWorkflow = dynamic(
-  () => import("@/components/CyberWorkflow").then((m) => ({ default: m.CyberWorkflow })),
-  { loading: () => <div className="hud-skeleton__body" style={{ minHeight: 120 }} /> }
-);
-
-export function ProjectWorkflowBar() {
-  const { live, job } = useProjectLive();
-
+/** 子会议页顶栏：紧凑状态条（layout 用） */
+export function MeetingStatusBar() {
+  const { live } = useProjectLive();
   if (!live) return <HudSkeleton />;
+  return <CompactMissionBar />;
+}
 
-  const liveRunning = job?.status === "running";
+/** 子会议概览：Agent 运行可视化（仅概览页） */
+export function MeetingPipelinePanel() {
+  const { live, job, traceLogs } = useProjectLive();
+  const { messages } = useI18n();
+
+  if (!live) return null;
+
+  const liveRunning = isPipelineRunning(live.status, job?.status);
+  const workflowSteps = buildWorkflowSteps(messages);
+  const progressPct = resolveLiveProgress(live, job, workflowSteps);
 
   const agentMessage =
+    (liveRunning ? pickLiveAgentMessage(traceLogs) : null) ||
+    live.state_json?.runtime_live?.message ||
     (live.state_json?.execution_graph as { agent_message?: string } | undefined)?.agent_message ||
     (live.state_json?.agent_plan as { reasoning?: string } | undefined)?.reasoning;
 
-  const subAgents =
-    ((live.state_json?.mission as { registered_agents?: { id: string; name: string; station: string }[] } | undefined)
-      ?.registered_agents?.filter((a) => a.id !== "main") ||
-      (live.state_json?.execution_graph as { sub_agents?: { id: string; name: string; station: string }[] } | undefined)
-        ?.sub_agents ||
-      (live.state_json?.agent_plan as { sub_agents?: { id: string; name: string; station: string }[] } | undefined)
-        ?.sub_agents) ??
-    [];
-
-  const executionMode =
-    live.state_json?.execution_mode ||
-    (live.state_json?.runtime as { execution_mode?: string } | undefined)?.execution_mode;
+  const subAgents = pickHudAgents(live.state_json);
+  const criticSummary = live.state_json?.runtime?.critic;
 
   return (
-    <div className="project-hud">
-      {executionMode === "orchestrator" && (
-        <p className="project-hud__mode" aria-label="执行模式">
-          Orchestrator · 主 Agent 拆解任务并调度子 Agent
-        </p>
-      )}
-      {executionMode === "react" && (
-        <p className="project-hud__mode" aria-label="执行模式">
-          ReAct 外环 · LLM 逐步调度内环工具
-        </p>
-      )}
-      <MissionControl project={live} job={job} />
-      <CyberWorkflow
+    <div className="project-hud project-hud--overview">
+      <PipelineHud
         status={live.status}
         jobStep={job?.current_step}
-        jobPct={job?.progress_pct}
+        jobPct={progressPct}
         jobStatus={job?.status}
         live={liveRunning}
         agentMessage={agentMessage}
         subAgents={subAgents}
+        criticSummary={criticSummary}
+        traceLogs={traceLogs}
+        showGraph={false}
       />
     </div>
+  );
+}
+
+/** @deprecated 使用 MeetingStatusBar + MeetingPipelinePanel */
+export function ProjectWorkflowBar() {
+  return (
+    <>
+      <MeetingStatusBar />
+      <MeetingPipelinePanel />
+    </>
   );
 }

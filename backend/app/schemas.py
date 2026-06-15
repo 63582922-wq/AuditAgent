@@ -8,6 +8,58 @@ class ProjectCreate(BaseModel):
     name: str
 
 
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class ProjectBatchDelete(BaseModel):
+    project_ids: list[str] = Field(default_factory=list)
+
+
+class MeetingCreate(BaseModel):
+    meeting_code: str
+    meeting_title: Optional[str] = None
+    observation_type: Optional[str] = None
+    meeting_type: Optional[str] = None
+    meeting_date: Optional[str] = None
+
+
+class MeetingUpdate(BaseModel):
+    meeting_code: Optional[str] = None
+    meeting_title: Optional[str] = None
+    observation_type: Optional[str] = None
+    meeting_type: Optional[str] = None
+    meeting_date: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class MeetingBatchDelete(BaseModel):
+    meeting_ids: list[str] = Field(default_factory=list)
+
+
+class MeetingOut(BaseModel):
+    id: str
+    project_id: str
+    meeting_code: str
+    meeting_title: Optional[str] = None
+    observation_type: Optional[str] = None
+    meeting_type: Optional[str] = None
+    meeting_date: Optional[str] = None
+    status: str
+    summary: Optional[str] = None
+    state_json: Optional[Dict[str, Any]] = None
+    deliverable_json: Optional[Dict[str, Any]] = None
+    file_count: int = 0
+    risk_count: int = 0
+    output_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+    last_run_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
 class ProjectOut(BaseModel):
     id: str
     name: str
@@ -22,6 +74,7 @@ class ProjectOut(BaseModel):
 class FileOut(BaseModel):
     id: str
     project_id: str
+    meeting_id: Optional[str] = None
     file_name: str
     file_type: str
     document_category: str
@@ -159,6 +212,7 @@ class ReanalyzeRequest(BaseModel):
 class JobOut(BaseModel):
     id: str
     project_id: str
+    meeting_id: Optional[str] = None
     status: str
     current_step: str
     progress_pct: int
@@ -216,3 +270,30 @@ class StatsOut(BaseModel):
     high_count: int
     medium_count: int
     low_count: int
+
+
+class HarnessImportRequest(BaseModel):
+    case_path: str
+    project_name: Optional[str] = None
+
+
+class HarnessRunRequest(BaseModel):
+    skip_orchestrator: bool = False
+    meeting_id: Optional[str] = None
+
+
+class HarnessImportToProjectRequest(BaseModel):
+    project_id: str
+    meeting_id: Optional[str] = None
+
+
+class HarnessResultOut(BaseModel):
+    project_id: str
+    meeting_id: str = ""
+    status: str
+    meeting_code: str = ""
+    finding_count: int = 0
+    meeting_case: Dict[str, Any] = Field(default_factory=dict)
+    runtime: Dict[str, Any] = Field(default_factory=dict)
+    job_id: Optional[str] = None
+    message: Optional[str] = None

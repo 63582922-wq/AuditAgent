@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, Optional
 from sqlalchemy.orm import Session
 
 from app.models import FileRecord, Project
+from app.services.agent.meeting_scope import scoped_query
 from app.services.agent.agent_trace import AgentTrace
 from app.services.agent.execution_graph import ExecutionGraph
 from app.services.agent.llm_client import require_agent_llm
@@ -12,6 +13,9 @@ from app.services.agent.mission_planner import decompose_mission
 from app.services.agent.skill_registry import load_skill
 from app.services.agent.pipeline_executor import PipelineExecutor
 from app.services.agent.sub_agent_runner import MainAgentRunner, SubAgentRunner
+from app.services.agent.modality_router import TEXT_INGEST_AGENT_ID, VISION_AGENT_ID
+from app.services.agent.text_ingest_runner import TextIngestRunner
+from app.services.agent.vision_agent_runner import VisionAgentRunner
 
 
 class MissionOrchestrator:
@@ -23,11 +27,13 @@ class MissionOrchestrator:
         project_id: str,
         progress_callback: Optional[Callable[[str, int], None]] = None,
         trace: Optional[AgentTrace] = None,
+        meeting_id: Optional[str] = None,
     ):
         self.db = db
         self.project_id = project_id
+        self.meeting_id = meeting_id
         self.progress_callback = progress_callback
-        self.trace = trace or AgentTrace(db, project_id)
+        self.trace = trace or AgentTrace(db, project_id, meeting_id)
 
     def run(self) -> Dict[str, Any]:
         require_agent_llm()
@@ -35,7 +41,7 @@ class MissionOrchestrator:
         if not project:
             raise ValueError("project not found")
 
-        files = self.db.query(FileRecord).filter_by(project_id=self.project_id).all()
+        files = scoped_query(self.db, FileRecord, self.project_id, self.meeting_id).all()
         if not files:
             raise ValueError("请先上传资料")
 
@@ -61,6 +67,7 @@ class MissionOrchestrator:
             self.project_id,
             self.progress_callback,
             self.trace,
+            self.meeting_id,
         )
         graph = ExecutionGraph.from_plan(mission.agent_plan, files)
         self.trace.plan(mission.agent_plan, graph.to_dict())
@@ -77,6 +84,10 @@ class MissionOrchestrator:
         for task in mission.tasks:
             if task.assignee == "main":
                 MainAgentRunner.execute_task(task, executor, self.trace)
+            elif task.assignee == VISION_AGENT_ID:
+                VisionAgentRunner.execute_task(task, executor, self.trace)
+            elif task.assignee == TEXT_INGEST_AGENT_ID:
+                TextIngestRunner.execute_task(task, executor, self.trace)
             else:
                 skill = load_skill(task.assignee)
                 SubAgentRunner.execute_task(

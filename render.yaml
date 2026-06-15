@@ -1,0 +1,66 @@
+# Render Blueprint · AuditAgent FXPG
+# 文档：docs/DEPLOY_RENDER.md
+
+databases:
+  - name: fxpg-db
+    databaseName: fxpg
+    user: fxpg
+    plan: basic-256mb
+    ipAllowList: []
+
+services:
+  - type: web
+    name: fxpg-api
+    runtime: docker
+    rootDir: backend
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: fxpg-storage
+      mountPath: /app/storage
+      sizeGB: 1
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fxpg-db
+          property: connectionString
+      - key: STORAGE_PATH
+        value: /app/storage
+      - key: API_KEY
+        generateValue: true
+      - key: BOOTSTRAP_DATA_ON_STARTUP
+        value: "true"
+      - key: SYNC_PGVECTOR_ON_STARTUP
+        value: "true"
+      - key: ENABLE_LLM
+        value: "true"
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.deepseek.com
+      - key: LLM_MODEL
+        value: deepseek-chat
+      - key: VISION_API_KEY
+        sync: false
+      - key: VISION_BASE_URL
+        value: https://open.bigmodel.cn/api/paas/v4
+      - key: VISION_MODEL
+        value: glm-ocr
+      - key: CORS_ORIGINS
+        sync: false
+
+  - type: web
+    name: fxpg-web
+    runtime: docker
+    rootDir: frontend
+    plan: starter
+    envVars:
+      - key: NEXT_PUBLIC_API_BASE
+        sync: false
+      - key: NEXT_PUBLIC_API_KEY
+        fromService:
+          type: web
+          name: fxpg-api
+          envVarKey: API_KEY
