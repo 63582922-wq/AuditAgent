@@ -141,12 +141,34 @@ def detect_duplicate_invoices(rows: list[dict]) -> list[dict]:
     return risks
 
 
-def check_missing_documents(present_categories: set[str], *, domain: str | None = None) -> list[dict]:
+def check_missing_documents(
+    present_categories: set[str],
+    *,
+    domain: str | None = None,
+    meeting_case: dict[str, Any] | None = None,
+) -> list[dict]:
     from app.services.domain.registry import get_domain_pack
 
     pack = get_domain_pack(domain=domain) if domain else get_domain_pack()
+    meeting_case = meeting_case or {}
+    meeting_code = str(meeting_case.get("meeting_code") or "")
+    reality_evidence = {
+        "meeting_screenshot",
+        "coordination_sms",
+        "observation_confirmation",
+        "sign_in_record",
+        "other_supporting_evidence",
+    }
+    has_alternative_reality_evidence = len(present_categories & reality_evidence) >= 2
     missing = []
     for doc_type, importance, reason in pack.required_docs:
+        if domain == "compliance":
+            if doc_type == "meeting_metadata" and meeting_case.get("meeting_code") and meeting_case.get("observation_type"):
+                continue
+            if doc_type == "a1_meeting_export" and meeting_code.startswith("SMS"):
+                continue
+            if doc_type == "meeting_screenshot" and has_alternative_reality_evidence:
+                continue
         if doc_type not in present_categories:
             missing.append({"document_type": doc_type, "importance": importance, "reason": reason})
     return missing

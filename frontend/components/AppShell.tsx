@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { ReactNode, useMemo } from "react";
 import { PreferencesBar } from "@/components/PreferencesBar";
 import { ProjectLiveProvider } from "@/contexts/ProjectLiveContext";
+import { MainAgentDrawer } from "@/components/MainAgentDrawer";
 import { ProjectRail } from "@/components/ProjectRail";
 import { useI18n } from "@/lib/i18n";
 
@@ -24,7 +25,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const projectId = projectIdFrom(pathname);
   const meetingId = meetingIdFrom(pathname);
   const { t } = useI18n();
-  const isMeetingFiles = /\/projects\/[^/]+\/meetings\/[^/]+\/files$/.test(pathname);
 
   const mainNav = useMemo(
     () => [
@@ -63,15 +63,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        {projectId && <ProjectRail projectId={projectId} />}
+        {projectId && meetingId && <ProjectRail projectId={projectId} />}
       </aside>
 
       <div className="shell-main">
-        <div className="shell-mobile-prefs">
-          <PreferencesBar placement="mobile" />
-        </div>
         <div className="shell-content">{children}</div>
       </div>
+      <aside className="shell-agent" aria-label={t("mainAgent.title")}>
+        <MainAgentDrawer projectId={projectId} meetingId={meetingId} pathname={pathname} />
+      </aside>
     </div>
   );
 
@@ -81,7 +81,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         projectId={projectId}
         meetingId={meetingId}
         includeLogs
-        includeAgent={isMeetingFiles}
+        includeAgent
       >
         {shell}
       </ProjectLiveProvider>

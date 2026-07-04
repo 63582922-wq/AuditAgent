@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import AgentRunLog, AnalysisJob, FileRecord, Output, Project, Risk
+from app.models import AgentRunLog, AnalysisJob, FileRecord, Project, Risk
 from app.schemas import ProjectLiveOut
 from app.services.meeting_service import get_meeting
+from app.services.output_scope import primary_output_count
 
 
 def _compact_agent_plan(value: object) -> dict | None:
@@ -87,7 +90,15 @@ def _compact_synthesis(value: object) -> dict | None:
 def compact_live_state(state_json: dict | None, deliverable_json: dict | None = None) -> dict | None:
     state = dict(state_json or {})
     compact = {}
-    passthrough_keys = ("execution_mode", "agent_domain", "runtime_live", "meeting_case", "missing_documents")
+    passthrough_keys = (
+        "execution_mode",
+        "agent_domain",
+        "runtime_live",
+        "meeting_case",
+        "present_categories",
+        "category_counts",
+        "missing_documents",
+    )
     for key in passthrough_keys:
         if key in state:
             compact[key] = state[key]
@@ -116,9 +127,23 @@ def _get_project_or_404(db: Session, project_id: str) -> Project:
     return project
 
 
+def _category_counts(db: Session, *, project_id: str, meeting_id: str | None = None) -> dict[str, int]:
+    query = db.query(FileRecord.document_category).filter_by(project_id=project_id)
+    if meeting_id:
+        query = query.filter_by(meeting_id=meeting_id)
+    counts = Counter(
+        category
+        for (category,) in query.all()
+        if category and category != "unknown"
+    )
+    return dict(sorted(counts.items()))
+
+
 def build_meeting_live(db: Session, project_id: str, meeting_id: str) -> ProjectLiveOut:
     project = _get_project_or_404(db, project_id)
     meeting = get_meeting(db, project_id, meeting_id)
+    state_json = dict(meeting.state_json or {})
+    state_json.setdefault("category_counts", _category_counts(db, project_id=project_id, meeting_id=meeting_id))
     return ProjectLiveOut(
         id=project.id,
         name=f"{project.name} · {meeting.meeting_code}",
@@ -126,15 +151,17 @@ def build_meeting_live(db: Session, project_id: str, meeting_id: str) -> Project
         summary=meeting.summary or project.summary,
         created_at=meeting.created_at,
         updated_at=meeting.updated_at,
-        state_json=compact_live_state(meeting.state_json, meeting.deliverable_json),
+        state_json=compact_live_state(state_json, meeting.deliverable_json),
         file_count=db.query(FileRecord).filter_by(meeting_id=meeting_id).count(),
         risk_count=db.query(Risk).filter_by(meeting_id=meeting_id).count(),
-        output_count=db.query(Output).filter_by(meeting_id=meeting_id).count(),
+        output_count=primary_output_count(db, meeting_id=meeting_id),
     )
 
 
 def build_project_live(db: Session, project_id: str) -> ProjectLiveOut:
     project = _get_project_or_404(db, project_id)
+    state_json = dict(project.state_json or {})
+    state_json.setdefault("category_counts", _category_counts(db, project_id=project_id))
     return ProjectLiveOut(
         id=project.id,
         name=project.name,
@@ -142,10 +169,10 @@ def build_project_live(db: Session, project_id: str) -> ProjectLiveOut:
         summary=project.summary,
         created_at=project.created_at,
         updated_at=project.updated_at,
-        state_json=compact_live_state(project.state_json),
+        state_json=compact_live_state(state_json),
         file_count=db.query(FileRecord).filter_by(project_id=project_id).count(),
         risk_count=db.query(Risk).filter_by(project_id=project_id).count(),
-        output_count=db.query(Output).filter_by(project_id=project_id).count(),
+        output_count=primary_output_count(db, project_id=project_id),
     )
 
 

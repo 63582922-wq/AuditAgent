@@ -4,6 +4,10 @@ import re
 from typing import Any, Dict, List
 
 from app.models import FileRecord, ParsedDocument
+from app.services.domain.compliance.template_field_engine import (
+    build_template_fact_bag,
+    merge_vision_consensus_fallbacks,
+)
 
 
 def _minutes_from_range(text: str) -> int | None:
@@ -17,6 +21,59 @@ def _minutes_from_range(text: str) -> int | None:
     return None
 
 
+def _material_from_parsed_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
+    content = doc.get("content_json") or {}
+    if not isinstance(content, dict):
+        content = {}
+    fields = content.get("fields") if isinstance(content.get("fields"), dict) else {}
+    confidence = content.get("field_confidence") or content.get("confidence")
+    if not isinstance(confidence, dict):
+        confidence = {}
+    fields, confidence = merge_vision_consensus_fallbacks(content, fields, confidence)
+    return {
+        "file_id": doc.get("file_id"),
+        "file_name": doc.get("file_name") or content.get("source_file_name") or "",
+        "document_category": doc.get("document_category") or content.get("document_type") or "",
+        "text_content": doc.get("text_content") or content.get("text_content") or "",
+        "fields": fields,
+        "field_confidence": confidence,
+        "sheets": content.get("sheets") or [],
+        "md_results": content.get("md_results") or "",
+        "vision_consensus": content.get("vision_consensus"),
+    }
+
+
+def _merge_template_facts(facts: Dict[str, Any], meeting_profile: Dict[str, Any], parsed_docs: List[dict]) -> None:
+    materials = [_material_from_parsed_doc(doc) for doc in parsed_docs]
+    fact_bag = build_template_fact_bag(meeting_profile, materials)
+    evidence_overrides = {
+        "actual_sign_in_count",
+        "attendance_delta",
+        "attendance_source",
+        "watch_record_count",
+        "start_attendee_count",
+        "max_attendee_count",
+        "end_attendee_count",
+        "zoom_peak_count",
+        "total_attendance_expression",
+        "material_code",
+        "material_code_display",
+        "presentation_topic",
+        "ppt_pages",
+    }
+    for key, value in fact_bag.values.items():
+        if value in (None, "", [], {}):
+            continue
+        if key in evidence_overrides or facts.get(key) in (None, "", [], {}, 0):
+            facts[key] = value
+    if fact_bag.sources:
+        facts["fact_sources"] = dict(fact_bag.sources)
+    if fact_bag.confidence:
+        facts["fact_confidence"] = dict(fact_bag.confidence)
+    if fact_bag.evidence:
+        facts["fact_evidence"] = dict(fact_bag.evidence)
+
+
 def build_case_facts(
     meeting_profile: Dict[str, Any],
     files: List[FileRecord],
@@ -24,11 +81,13 @@ def build_case_facts(
 ) -> Dict[str, Any]:
     categories = {f.document_category for f in files}
     facts = dict(meeting_profile)
+    _merge_template_facts(facts, meeting_profile, parsed_docs)
     facts["has_a1_export"] = "a1_meeting_export" in categories
     facts["has_confirmation"] = "observation_confirmation" in categories
     facts["has_coordination_sms"] = "coordination_sms" in categories
     facts["has_sign_in"] = "sign_in_record" in categories
     facts["has_agenda"] = "meeting_agenda" in categories
+    facts["has_presentation_material"] = "presentation_material" in categories
 
     planned = facts.get("planned_duration_minutes")
     if planned is None:
@@ -50,6 +109,7 @@ def build_case_facts(
         cat = doc.get("document_category")
         text = doc.get("text_content") or ""
         fields = doc.get("content_json", {}).get("fields") or {}
+        sheets = doc.get("content_json", {}).get("sheets") or []
 
         if cat == "observation_confirmation":
             if not actual:
@@ -73,6 +133,14 @@ def build_case_facts(
                 sign_in_count += int(fields["actual_sign_in_count"])
             else:
                 sign_in_count += len(re.findall(r"已签到", text))
+            for sheet in sheets:
+                rows = sheet.get("rows") or []
+                if not rows:
+                    continue
+                headers = set((rows[0].get("values") or {}).keys())
+                if {"会议时间", "观众姓名", "登录时间", "登录时长"}.issubset(headers):
+                    facts["attendance_source"] = "watch_record"
+                    facts["watch_record_count"] = sum(1 for r in rows if (r.get("values") or {}).get("观众姓名"))
 
     try:
         actual = int(actual) if actual is not None else None
@@ -83,11 +151,35 @@ def build_case_facts(
     facts["duration_delta_minutes"] = abs(
         int(facts["actual_duration_minutes"]) - int(facts["planned_duration_minutes"])
     )
-    facts["speaker_service_minutes"] = speaker_minutes or int(facts.get("speaker_duration") or 30)
+    facts["speaker_service_minutes"] = speaker_minutes or facts.get("speaker_service_minutes") or int(
+        facts.get("speaker_duration") or 30
+    )
     facts["material_code"] = material_code
-    facts["actual_sign_in_count"] = sign_in_count or int(facts.get("planned_attendees") or 0)
-    facts["planned_attendees"] = int(facts.get("planned_attendees") or facts["actual_sign_in_count"] or 7)
-    facts["attendance_delta"] = abs(facts["actual_sign_in_count"] - facts["planned_attendees"])
+    if facts.get("has_presentation_material") and not material_code:
+        facts["material_code_pending_vision"] = True
+    current_sign_in = None
+    try:
+        current_sign_in = int(facts.get("actual_sign_in_count")) if facts.get("actual_sign_in_count") not in (None, "") else None
+    except (TypeError, ValueError):
+        current_sign_in = None
+    if current_sign_in is not None and current_sign_in <= 0:
+        current_sign_in = None
+
+    watch_record_only = facts.get("attendance_source") == "watch_record" and not sign_in_count and not current_sign_in
+    if sign_in_count:
+        actual_sign_in_count = sign_in_count
+    elif current_sign_in:
+        actual_sign_in_count = current_sign_in
+    elif watch_record_only:
+        actual_sign_in_count = None
+    else:
+        actual_sign_in_count = int(facts.get("planned_attendees") or 0)
+
+    facts["actual_sign_in_count"] = actual_sign_in_count
+    facts["planned_attendees"] = int(facts.get("planned_attendees") or actual_sign_in_count or 7)
+    facts["attendance_delta"] = (
+        None if actual_sign_in_count is None else abs(actual_sign_in_count - facts["planned_attendees"])
+    )
     return facts
 
 
@@ -102,6 +194,14 @@ def run_compliance_checks(facts: Dict[str, Any], rules: List[dict]) -> List[dict
     hits: List[dict] = []
     for rule in rules:
         if not rule.get("enabled", True):
+            continue
+        rule_id = str(rule.get("rule_id") or "")
+        meeting_code = str(facts.get("meeting_code") or "")
+        if rule_id == "CMP-004" and meeting_code.startswith("SMS"):
+            continue
+        if rule_id == "CMP-005" and facts.get("material_code_pending_vision"):
+            continue
+        if rule_id == "CMP-006" and facts.get("attendance_source") == "watch_record":
             continue
         cond = rule.get("condition_json") or rule.get("condition")
         if not cond:

@@ -30,10 +30,18 @@ export default function RulesPage() {
     suggestion_template: "",
   });
   const [msg, setMsg] = useState("");
+  const [msgKind, setMsgKind] = useState<"danger" | "success">("success");
   const [formError, setFormError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [toggleBusyId, setToggleBusyId] = useState("");
 
   function load() {
-    api<Rule[]>("/rules").then(setRules).catch(console.error);
+    api<Rule[]>("/rules", { cache: "no-store" })
+      .then(setRules)
+      .catch((e) => {
+        setMsgKind("danger");
+        setMsg(e instanceof Error ? e.message : String(e));
+      });
   }
 
   useEffect(() => {
@@ -48,6 +56,7 @@ export default function RulesPage() {
       setFormError(t("common.fillRequired"));
       return;
     }
+    setBusy(true);
     try {
       await api("/rules", {
         method: "POST",
@@ -59,16 +68,31 @@ export default function RulesPage() {
           priority: 80,
         }),
       });
+      setMsgKind("success");
       setMsg(t("settings.added"));
       load();
     } catch (err) {
-      setMsg(String(err));
+      setMsgKind("danger");
+      setMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function toggleRule(ruleDbId: string) {
-    await api(`/rules/${ruleDbId}/toggle`, { method: "PATCH" });
-    load();
+  async function toggleRule(rule: Rule) {
+    setToggleBusyId(rule.id);
+    setMsg("");
+    try {
+      await api(`/rules/${rule.id}/toggle`, { method: "PATCH" });
+      setMsgKind("success");
+      setMsg(rule.enabled ? t("settings.disabled") : t("settings.enabled"));
+      load();
+    } catch (e) {
+      setMsgKind("danger");
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setToggleBusyId("");
+    }
   }
 
   const cmpRules = rules.filter((r) => r.rule_id.startsWith("CMP-"));
@@ -88,14 +112,21 @@ export default function RulesPage() {
             placeholder={t("settings.ruleIdPlaceholder")}
             value={form.rule_id}
             onChange={(e) => setForm({ ...form, rule_id: e.target.value })}
+            disabled={busy}
           />
           <input
             className="input"
             placeholder={t("settings.ruleNamePlaceholder")}
             value={form.rule_name}
             onChange={(e) => setForm({ ...form, rule_name: e.target.value })}
+            disabled={busy}
           />
-          <select className="input" value={form.risk_category} onChange={(e) => setForm({ ...form, risk_category: e.target.value })}>
+          <select
+            className="input"
+            value={form.risk_category}
+            onChange={(e) => setForm({ ...form, risk_category: e.target.value })}
+            disabled={busy}
+          >
             {COMPLIANCE_RULE_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {c}
@@ -106,6 +137,7 @@ export default function RulesPage() {
             className="input"
             value={form.applicable_document_type}
             onChange={(e) => setForm({ ...form, applicable_document_type: e.target.value })}
+            disabled={busy}
           >
             {DOC_TYPES.map((d) => (
               <option key={d} value={d}>
@@ -118,12 +150,13 @@ export default function RulesPage() {
             placeholder={t("settings.suggestionPlaceholder")}
             value={form.suggestion_template}
             onChange={(e) => setForm({ ...form, suggestion_template: e.target.value })}
+            disabled={busy}
           />
-          <button type="submit" className="btn" style={{ justifySelf: "start" }}>
-            {t("settings.add")}
+          <button type="submit" className="btn" style={{ justifySelf: "start" }} disabled={busy}>
+            {busy ? t("common.processing") : t("settings.add")}
           </button>
           {formError && <p className="form-hint">{formError}</p>}
-          {msg && <p className="muted">{msg}</p>}
+          {msg && <p className={`alert ${msgKind}`}>{msg}</p>}
         </form>
       </Block>
 
@@ -141,8 +174,13 @@ export default function RulesPage() {
           {rules.map((r) => (
             <tr key={r.id} style={{ opacity: r.enabled ? 1 : 0.45 }}>
               <td>
-                <button type="button" className="btn-text" onClick={() => toggleRule(r.id)}>
-                  {r.enabled ? t("settings.toggleOn") : t("settings.toggleOff")}
+                <button
+                  type="button"
+                  className="btn-text"
+                  onClick={() => toggleRule(r)}
+                  disabled={busy || !!toggleBusyId}
+                >
+                  {toggleBusyId === r.id ? t("common.processing") : r.enabled ? t("settings.toggleOn") : t("settings.toggleOff")}
                 </button>
               </td>
               <td className="mono">{r.rule_id}</td>

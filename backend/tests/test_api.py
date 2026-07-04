@@ -6,8 +6,9 @@ from fastapi.testclient import TestClient
 
 from app.database import SessionLocal, init_db
 from app.main import app
-from app.models import FileRecord, Project, Risk
+from app.models import AgentActionProposal, FileRecord, Project, Risk
 from app.services.agent.workflow import AgentWorkflow
+from app.services.meeting_service import create_meeting
 from app.services.seed import seed_rules
 
 
@@ -66,3 +67,31 @@ def test_dismissed_risks_excluded_from_outputs(db, tmp_path):
     wf.regenerate_outputs_only()
     active = db.query(Risk).filter_by(project_id=p.id).filter(Risk.status != "dismissed").count()
     assert active == len(risks) - 1
+
+
+def test_batch_delete_project_removes_new_project_child_tables(client, db):
+    project = Project(name="删除级联测试", status="active")
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    meeting = create_meeting(db, project.id, meeting_code="DEL001")
+    proposal = AgentActionProposal(
+        project_id=project.id,
+        meeting_id=meeting.id,
+        action_id="test-action",
+        label="测试动作",
+        description="测试删除级联",
+        segment="files",
+    )
+    db.add(proposal)
+    db.commit()
+    project_id = project.id
+    proposal_id = proposal.id
+
+    res = client.post("/api/projects/batch-delete", json={"project_ids": [project_id]})
+
+    assert res.status_code == 200
+    assert res.json()["deleted"] == 1
+    db.expire_all()
+    assert db.get(Project, project_id) is None
+    assert db.get(AgentActionProposal, proposal_id) is None

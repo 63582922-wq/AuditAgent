@@ -57,6 +57,7 @@ def parse_excel(file_path: Path) -> dict[str, Any]:
             {
                 "sheet_name": sheet_name,
                 "header_row": header_idx + 1,
+                "pre_header_rows": raw_rows[:header_idx],
                 "columns": columns,
                 "rows": rows,
             }
@@ -97,7 +98,15 @@ def _parse_csv(file_path: Path) -> dict[str, Any]:
         rows.append({"row_number": r_idx, "values": values})
     return {
         "file_type": "excel",
-        "sheets": [{"sheet_name": "Sheet1", "header_row": header_idx + 1, "columns": columns, "rows": rows}],
+        "sheets": [
+            {
+                "sheet_name": "Sheet1",
+                "header_row": header_idx + 1,
+                "pre_header_rows": raw_rows[:header_idx],
+                "columns": columns,
+                "rows": rows,
+            }
+        ],
     }
 
 

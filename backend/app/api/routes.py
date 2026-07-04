@@ -7,6 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
@@ -30,6 +31,10 @@ from app.models import (
 )
 from app.schemas import (
     AnalyzeResponse,
+    AgentActionApproveRequest,
+    AgentActionApproveResponse,
+    AgentChatRequest,
+    AgentChatResponse,
     FileOut,
     JobOut,
     MeetingBatchDelete,
@@ -74,6 +79,8 @@ from app.services.agent.workflow import AgentWorkflow
 from app.services.harness_job_service import start_harness_job
 from app.services.agent.memory_writer import write_review_memory
 from app.services.agent.llm_client import llm_available, require_agent_llm
+from app.services.agent.action_executor import approve_agent_action
+from app.services.agent.main_chat import run_main_agent_chat
 from app.services.domain.registry import get_domain_pack, resolve_agent_domain
 from app.services.jobs.worker import create_job, enqueue_analysis, enqueue_harness
 from app.services.project_live_service import (
@@ -84,6 +91,7 @@ from app.services.project_live_service import (
     list_meeting_logs as load_meeting_logs,
     list_project_logs as load_project_logs,
 )
+from app.services.output_scope import primary_output_count, primary_outputs
 from app.services.seed import seed_memories, seed_rules
 
 router = APIRouter(dependencies=[Depends(require_api_key)])
@@ -125,6 +133,8 @@ def agent_status():
     return {
         "mode": "agent_only",
         "ready": ready,
+        "rules_ready": True,
+        "full_agent_ready": ready,
         "agent_domain": settings.agent_domain,
         "domain_label": get_domain_pack().label,
         "vision_ready": vision_available(),
@@ -134,6 +144,26 @@ def agent_status():
             else "请配置 LLM_API_KEY 并启用 ENABLE_LLM"
         ),
     }
+
+
+@router.post("/agent/chat", response_model=AgentChatResponse)
+def agent_chat(payload: AgentChatRequest, db: Session = Depends(get_db)):
+    return run_main_agent_chat(
+        db,
+        message=payload.message,
+        project_id=payload.project_id,
+        meeting_id=payload.meeting_id,
+        history=payload.history,
+    )
+
+
+@router.post("/agent/actions/{proposal_id}/approve", response_model=AgentActionApproveResponse)
+def approve_agent_action_route(
+    proposal_id: str,
+    payload: Optional[AgentActionApproveRequest] = None,
+    db: Session = Depends(get_db),
+):
+    return approve_agent_action(db, proposal_id, comment=(payload.comment if payload else None))
 
 
 @router.post("/projects", response_model=ProjectOut)
@@ -281,7 +311,7 @@ def get_project_overview(project_id: str, db: Session = Depends(get_db)):
     )
     file_count = len(files)
     risk_count = db.query(Risk).filter_by(project_id=project_id).count()
-    output_count = db.query(Output).filter_by(project_id=project_id).count()
+    output_count = primary_output_count(db, project_id=project_id)
     return ProjectOverviewOut(
         id=project.id,
         name=project.name,
@@ -607,15 +637,7 @@ def get_agent_briefs(project_id: str, db: Session = Depends(get_db)):
 
 def _delete_project_cascade(db: Session, project_id: str) -> None:
     """删除项目及全部关联数据（含磁盘 uploads/outputs）。"""
-    db.query(ReviewRecord).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(Risk).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(ParsedDocument).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(ExtractedEntity).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(RecordLink).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(AgentRunLog).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(AnalysisJob).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(Output).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(FileRecord).filter_by(project_id=project_id).delete(synchronize_session=False)
+    _delete_project_child_rows(db, project_id)
     db.query(Meeting).filter_by(project_id=project_id).delete(synchronize_session=False)
     for sub in ("uploads", "outputs"):
         path = settings.storage_path / sub / project_id
@@ -624,6 +646,47 @@ def _delete_project_cascade(db: Session, project_id: str) -> None:
     project = db.get(Project, project_id)
     if project:
         db.delete(project)
+
+
+def _delete_project_child_rows(db: Session, project_id: str) -> None:
+    """Delete every project-owned child table before deleting meetings/projects.
+
+    The compliance product evolves by adding audit/evaluation/supplement tables.
+    Keeping this dynamic prevents stale cascade lists from breaking batch delete.
+    """
+    inspector = inspect(db.get_bind())
+    ordered = [
+        "review_records",
+        "supplement_requests",
+        "evidence_gaps",
+        "audit_check_results",
+        "audit_facts",
+        "evaluation_runs",
+        "audit_runs",
+        "agent_action_proposals",
+        "agent_run_logs",
+        "analysis_jobs",
+        "outputs",
+        "record_links",
+        "extracted_entities",
+        "parsed_documents",
+        "risks",
+        "files",
+    ]
+    project_tables: list[str] = []
+    for table_name in inspector.get_table_names():
+        if table_name in {"projects", "meetings"}:
+            continue
+        columns = {col["name"] for col in inspector.get_columns(table_name)}
+        if "project_id" in columns:
+            project_tables.append(table_name)
+
+    remaining = sorted(t for t in project_tables if t not in ordered)
+    for table_name in [t for t in ordered if t in project_tables] + remaining:
+        db.execute(
+            text(f'DELETE FROM "{table_name}" WHERE project_id = :project_id'),
+            {"project_id": project_id},
+        )
 
 
 @router.delete("/projects/{project_id}")
@@ -662,7 +725,7 @@ def list_meeting_risks(
 @router.get("/projects/{project_id}/meetings/{meeting_id}/outputs")
 def list_meeting_outputs(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
     get_meeting(db, project_id, meeting_id)
-    return db.query(Output).filter_by(project_id=project_id, meeting_id=meeting_id).all()
+    return primary_outputs(db, project_id=project_id, meeting_id=meeting_id)
 
 
 @router.get("/projects/{project_id}/meetings/{meeting_id}/logs", response_model=list)
@@ -871,7 +934,7 @@ def reject_deliverables(
 
 @router.get("/projects/{project_id}/outputs")
 def list_outputs(project_id: str, db: Session = Depends(get_db)):
-    return db.query(Output).filter_by(project_id=project_id).all()
+    return primary_outputs(db, project_id=project_id)
 
 
 @router.get("/projects/{project_id}/outputs/{output_id}/download")
@@ -1074,6 +1137,7 @@ async def harness_import_case_upload(
 async def harness_run_case_upload(
     files: list[UploadFile] = File(...),
     project_name: Optional[str] = Form(None),
+    skip_orchestrator: bool = Form(False),
     db: Session = Depends(get_db),
 ):
     """从浏览器选择文件夹上传、导入并异步运行 Harness。"""
@@ -1084,7 +1148,12 @@ async def harness_run_case_upload(
     try:
         harness = ComplianceHarness(db)
         project_id, meeting_id, profile = harness.import_case(case_dir, project_name)
-        job, created = start_harness_job(db, project_id, meeting_id)
+        job, created = start_harness_job(
+            db,
+            project_id,
+            meeting_id,
+            skip_orchestrator=skip_orchestrator,
+        )
         return HarnessResultOut(
             project_id=project_id,
             meeting_id=meeting_id,

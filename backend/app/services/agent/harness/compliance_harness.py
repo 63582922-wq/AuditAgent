@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import FileRecord, Meeting, Project, Risk
+from app.models import FileRecord, Meeting, ParsedDocument, Project, Risk
 from app.services.agent.agent_trace import AgentTrace
 from app.services.agent.orchestrator import MissionOrchestrator
 from app.services.agent.runtime import AgentRuntime
@@ -21,7 +21,12 @@ from app.services.domain.compliance.finding_generator import generate_finding_na
 from app.services.domain.compliance.classifier import classify_compliance_document
 from app.services.cross_checker import check_missing_documents
 from app.services.domain.registry import get_domain_pack
+from app.services.evaluation.compliance_eval import (
+    compact_compliance_evaluation,
+    run_db_compliance_evaluation,
+)
 from app.services.meeting_service import sync_project_rollups
+from app.services.parsed_document_store import upsert_parsed_document
 
 
 @dataclass
@@ -98,12 +103,18 @@ class ComplianceHarness:
         meeting = self.db.get(Meeting, meeting_id)
         project = self.db.get(Project, project_id)
         if meeting:
+            next_status = step
+            if step == "completed":
+                deliverable = dict(meeting.deliverable_json or (meeting.state_json or {}).get("deliverable") or {})
+                gate = deliverable.get("evaluation_gate") if isinstance(deliverable.get("evaluation_gate"), dict) else {}
+                if meeting.status == "needs_review" or deliverable.get("status") == "needs_review" or gate.get("blocked"):
+                    next_status = "needs_review"
             self._update_meeting_state(
                 meeting,
-                status=step,
+                status=next_status,
                 runtime_live={
-                "step": step,
-                "pct": pct_val,
+                    "step": step,
+                    "pct": pct_val,
                     "updated_at": now.isoformat() + "Z",
                 },
             )
@@ -202,6 +213,61 @@ class ComplianceHarness:
         )
         return adjudicated
 
+    def _ensure_parsed_documents(self, project_id: str, meeting_id: str) -> int:
+        """保证规则/交付前至少完成基础资料解析；用于跳过 Orchestrator 或 Orchestrator 漏解析的场景。"""
+        workflow = AgentWorkflow(self.db, project_id, self.progress_callback, meeting_id=meeting_id)
+        existing_ids = {
+            row[0]
+            for row in self.db.query(ParsedDocument.file_id)
+            .filter_by(project_id=project_id, meeting_id=meeting_id)
+            .all()
+        }
+        parsed_count = 0
+        for f in self._meeting_files(project_id, meeting_id):
+            if f.id in existing_ids:
+                continue
+            suffix = Path(f.storage_path or f.file_name).suffix.lower()
+            if suffix not in (".xlsx", ".xls", ".csv", ".docx", ".doc"):
+                self.trace.log(
+                    "parsing",
+                    "skipped",
+                    kind="tool",
+                    message=f"跳过同步兜底解析 {f.file_name}",
+                    detail={"file_id": f.id, "reason": "vision_or_pdf_pipeline"},
+                )
+                continue
+            try:
+                content = workflow._parse_file(f)
+                upsert_parsed_document(
+                    self.db,
+                    project_id=project_id,
+                    meeting_id=meeting_id,
+                    file_id=f.id,
+                    document_type=f.document_category,
+                    content_json=content,
+                    text_content=content.get("text_content", ""),
+                )
+                f.parse_status = "done"
+                parsed_count += 1
+                self.trace.log(
+                    "parsing",
+                    "completed",
+                    kind="tool",
+                    message=f"解析资料 {f.file_name}",
+                    detail={"file_id": f.id, "document_category": f.document_category},
+                )
+            except Exception as exc:
+                f.parse_status = "failed"
+                self.trace.log(
+                    "parsing",
+                    "failed",
+                    kind="tool",
+                    message=f"解析资料失败 {f.file_name}: {exc}",
+                    detail={"file_id": f.id, "error": str(exc)},
+                )
+        self.db.commit()
+        return parsed_count
+
     def _persist_findings(
         self, project_id: str, meeting_id: str, findings: List[dict], files: Optional[List[FileRecord]] = None
     ) -> None:
@@ -279,7 +345,10 @@ class ComplianceHarness:
         post_status: str,
     ) -> Meeting:
         meeting = self._meeting(project_id, meeting_id)
-        deliverable = {"status": "pending", "comment": ""}
+        state = dict(meeting.state_json or {})
+        deliverable = dict(meeting.deliverable_json or state.get("deliverable") or {})
+        deliverable.setdefault("status", "pending")
+        deliverable.setdefault("comment", "")
         self._update_meeting_state(
             meeting,
             status=post_status if post_status in ("needs_review", "completed") else "completed",
@@ -289,6 +358,72 @@ class ComplianceHarness:
         self.db.commit()
         sync_project_rollups(self.db, project_id)
         return meeting
+
+    def _persist_evaluation(self, project_id: str, meeting_id: str) -> dict[str, Any]:
+        report = run_db_compliance_evaluation(self.db, project_id, meeting_id)
+        meeting = self._meeting(project_id, meeting_id)
+        state = dict(meeting.state_json or {})
+        state["evaluation"] = report
+
+        deliverable = dict(meeting.deliverable_json or state.get("deliverable") or {})
+        deliverable.setdefault("status", "pending")
+        deliverable.setdefault("comment", "")
+        deliverable["evaluation"] = compact_compliance_evaluation(report)
+        if (
+            report.get("status") == "completed"
+            and report.get("passed") is False
+            and int(report.get("critical_failures") or 0) > 0
+        ):
+            failed_ids = [
+                str(item.get("check_id"))
+                for item in report.get("checks", [])
+                if not item.get("passed") and item.get("severity") == "critical" and item.get("check_id")
+            ]
+            deliverable["status"] = "needs_review"
+            deliverable["evaluation_gate"] = {
+                "blocked": True,
+                "reason": "automatic_evaluation_failed",
+                "critical_failures": int(report.get("critical_failures") or 0),
+                "failed_check_ids": failed_ids,
+            }
+            deliverable["comment"] = "自动评估存在严重失败，需定向复核后再交付。"
+            meeting.status = "needs_review"
+        elif report.get("status") == "completed" and report.get("passed") is True:
+            deliverable["evaluation_gate"] = {
+                "blocked": False,
+                "reason": "automatic_evaluation_passed",
+                "critical_failures": 0,
+                "failed_check_ids": [],
+            }
+        state["deliverable"] = deliverable
+        meeting.state_json = state
+        meeting.deliverable_json = deliverable
+        self.db.commit()
+
+        if report.get("status") == "skipped":
+            self.trace.log(
+                "compliance_evaluation",
+                "skipped",
+                kind="evaluation",
+                message="未命中评估基准，跳过自动评分",
+                detail={"meeting_code": report.get("meeting_code"), "reason": report.get("reason")},
+            )
+        else:
+            self.trace.log(
+                "compliance_evaluation",
+                "completed" if report.get("passed") else "failed",
+                kind="evaluation",
+                message=(
+                    f"自动评估 {'通过' if report.get('passed') else '未通过'}："
+                    f"{report.get('passed_checks', 0)}/{report.get('total_checks', 0)} 项"
+                ),
+                detail={
+                    "case_id": report.get("case_id"),
+                    "critical_failures": report.get("critical_failures", 0),
+                    "warning_failures": report.get("warning_failures", 0),
+                },
+            )
+        return report
 
     def run(
         self,
@@ -327,7 +462,11 @@ class ComplianceHarness:
                 project_id,
                 self.progress_callback,
                 self.trace,
+                meeting_id,
             ).run()
+
+        self._emit_progress(project_id, meeting_id, "parsing")
+        self._ensure_parsed_documents(project_id, meeting_id)
 
         self._emit_progress(project_id, meeting_id, "running_rules")
         findings = self._run_compliance_rules(project_id, meeting_id)
@@ -335,7 +474,8 @@ class ComplianceHarness:
         self._persist_findings(project_id, meeting_id, findings, files=files)
 
         present = self._present_categories(files)
-        missing = check_missing_documents(present, domain="compliance")
+        meeting_case = dict((meeting.state_json or {}).get("meeting_case") or {})
+        missing = check_missing_documents(present, domain="compliance", meeting_case=meeting_case)
         self._sync_meeting_snapshot(project_id, meeting_id, findings, missing, files=files)
 
         runtime = AgentRuntime(self.db, project_id, self.progress_callback, meeting_id=meeting_id)
@@ -348,6 +488,7 @@ class ComplianceHarness:
             missing=missing,
             post_status=post.status,
         )
+        self._persist_evaluation(project_id, meeting_id)
 
         self._emit_progress(project_id, meeting_id, "completed", 100)
 

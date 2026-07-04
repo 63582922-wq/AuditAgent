@@ -17,6 +17,49 @@ class ProjectBatchDelete(BaseModel):
     project_ids: list[str] = Field(default_factory=list)
 
 
+class AgentChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class AgentChatRequest(BaseModel):
+    message: str
+    project_id: Optional[str] = None
+    meeting_id: Optional[str] = None
+    history: list[AgentChatMessage] = Field(default_factory=list)
+
+
+class AgentChatAction(BaseModel):
+    id: str
+    label: str
+    description: str
+    segment: str
+    requires_meeting: bool = False
+    requires_approval: bool = False
+    proposal_id: Optional[str] = None
+    tone: str = "default"
+
+
+class AgentChatResponse(BaseModel):
+    reply: str
+    actions: list[AgentChatAction] = Field(default_factory=list)
+    mode: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentActionApproveRequest(BaseModel):
+    comment: Optional[str] = None
+
+
+class AgentActionApproveResponse(BaseModel):
+    ok: bool
+    proposal_id: str
+    action_id: str
+    status: str
+    message: Optional[str] = None
+    job_id: Optional[str] = None
+
+
 class MeetingCreate(BaseModel):
     meeting_code: str
     meeting_title: Optional[str] = None

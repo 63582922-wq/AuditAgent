@@ -22,6 +22,7 @@ from app.models import (
     ReviewRecord,
     Risk,
 )
+from app.services.output_scope import primary_output_count
 
 
 def _normalize_code(code: str) -> str:
@@ -48,7 +49,7 @@ def meeting_to_dict(m: Meeting, *, counts: bool = False, db: Session | None = No
     if counts and db is not None:
         out["file_count"] = db.query(FileRecord).filter_by(meeting_id=m.id).count()
         out["risk_count"] = db.query(Risk).filter_by(meeting_id=m.id).count()
-        out["output_count"] = db.query(Output).filter_by(meeting_id=m.id).count()
+        out["output_count"] = primary_output_count(db, meeting_id=m.id)
     return out
 
 
@@ -62,7 +63,22 @@ def get_meeting(db: Session, project_id: str, meeting_id: str) -> Meeting:
 def list_meetings(db: Session, project_id: str) -> list[Meeting]:
     if not db.get(Project, project_id):
         raise FXPGError("项目不存在", code="PROJECT_NOT_FOUND", status=404)
-    return db.query(Meeting).filter_by(project_id=project_id).order_by(Meeting.created_at.desc()).all()
+    meetings = db.query(Meeting).filter_by(project_id=project_id).order_by(Meeting.created_at.desc()).all()
+    if len(meetings) <= 1:
+        return meetings
+    return [m for m in meetings if not _is_empty_default_meeting(db, m)]
+
+
+def _is_empty_default_meeting(db: Session, meeting: Meeting) -> bool:
+    if _normalize_code(meeting.meeting_code) != "DEFAULT":
+        return False
+    filters = {"project_id": meeting.project_id, "meeting_id": meeting.id}
+    return (
+        db.query(FileRecord).filter_by(**filters).count() == 0
+        and db.query(Risk).filter_by(**filters).count() == 0
+        and db.query(Output).filter_by(**filters).count() == 0
+        and db.query(ParsedDocument).filter_by(**filters).count() == 0
+    )
 
 
 def create_meeting(

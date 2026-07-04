@@ -31,10 +31,10 @@ export const zh = {
     review: "复核",
     selectAll: "全选",
     pending: "待启动",
-    contextLabel: "当前位置",
-    projectScope: "观察项目",
-    meetingScope: "子会议",
-    meetingNav: "子会议工作台",
+    contextLabel: "当前案件",
+    projectScope: "当前项目",
+    meetingScope: "当前案件",
+    meetingNav: "页面入口",
     workflow: "流程",
   },
   errors: {
@@ -58,6 +58,78 @@ export const zh = {
     actionFailed: "操作失败，请重试",
     fillRequired: "请填写必填项",
   },
+  mainAgent: {
+    fab: "主 Agent",
+    title: "主 Agent",
+    subtitle: "对话调度台",
+    close: "关闭",
+    send: "发送",
+    context: "当前上下文",
+    requiresApproval: "需确认",
+    openActionPage: "去页面确认",
+    approveAction: "确认执行",
+    approving: "执行中",
+    approvalConfirm: "确认执行该动作？",
+    rejectReasonPrompt: "请输入退回原因",
+    approvalDone: "动作已执行：{status}",
+    approvalFailed: "执行失败，请到对应页面处理",
+    transportError: "我现在没有拿到后端 Agent 的回答，因此不能替你判断结论。请先查看日志或资料页；服务恢复后再继续追问，我会基于实时上下文回答。",
+    modeLive: "实时 Agent",
+    modeFallback: "规则兜底",
+    modeOffline: "连接失败",
+    inputPlaceholder: "直接问：为什么没通过、哪列没填、要补什么、下一步怎么处理",
+    globalScope: "全局项目台",
+    projectScope: "项目 {projectId}",
+    meetingScope: "子会议 {meetingId}",
+    statusUnknown: "待连接",
+    noJob: "暂无任务",
+    emptyScope: "进入一场子会议后，我会带上实时分析上下文。",
+    liveSummary: "状态 {status} · 资料 {files} · Finding {findings} · 交付 {outputs}",
+    jobSummary: "任务 {status} · {progress}%",
+    suggestionsLabel: "快捷提问",
+    suggestions: {
+      status: "现在卡在哪",
+      materials: "是否要补资料",
+      deliver: "怎么交付验收",
+    },
+    prompts: {
+      status: "现在项目进度和状态是什么？",
+      materials: "是否需要补充资料，入口在哪里？",
+      deliver: "交付、下载、验收和退回怎么处理？",
+    },
+    messages: {
+      welcomeGlobal: "我可以协助你创建或进入观察案件。进入子会议后，我会结合该场资料、Finding 和交付状态给出下一步。",
+      welcomeProject: "我已进入当前观察项目。请选择或导入一场子会议，我会把后续资料、分析、复核和交付串起来。",
+      welcomeMeeting: "我已接入当前子会议。你可以像问同事一样问我：资料是否够、为什么命中 Finding、固定模板哪列还缺、是否需要重跑或怎么验收。",
+      status: "当前状态：{status}。资料 {files} 份，Finding {findings} 条，交付物 {outputs} 个；最近任务为 {jobStatus}，进度 {progress}%。",
+      needMaterials: "如果现有证据不足，应该先回到资料页补充文件，再重新运行分析。这里不会伪造通过结论。",
+      review: "Finding 和证据链应先在清单页查看；需要人工判断时进入逐条复核，标记确认、排除或需补充。",
+      deliver: "交付相关动作必须在交付验收页完成：下载检查后再验收，通过或退回都保留结构化记录。",
+      rerun: "重新分析属于高影响动作，应回到资料页或复核页发起，便于保留原因、日志和结果。",
+      default: "我会结合当前子会议的资料、Finding、交付和日志回答。你也可以继续追问某一列、某一份资料或某条 Finding 的判断依据。",
+      offline: "当前无法连接后端分析服务。你可以先查看页面数据；恢复后端后我会继续读取实时状态。",
+    },
+    actions: {
+      projects: "打开观察项目",
+      projectsDesc: "选择或导入一场观察案件",
+      files: "补充资料",
+      filesDesc: "上传缺件或重新运行分析",
+      findings: "查看 Finding",
+      findingsDesc: "核对命中项和证据链",
+      review: "逐条复核",
+      reviewDesc: "确认、排除或标记需补充",
+      outputs: "交付验收",
+      outputsDesc: "下载、验收或退回交付物",
+      logs: "查看 Agent 日志",
+      logsDesc: "定位执行步骤和工具调用",
+      accept: "去验收通过",
+      acceptDesc: "跳到交付页执行验收",
+      reject: "去退回交付",
+      rejectDesc: "跳到交付页填写退回原因",
+      reanalyze: "去重新分析",
+      reanalyzeDesc: "跳到资料页发起重跑",
+    },
+  },
   home: {
     desc: "资料接入 · 合规分析 · Finding 交付验收",
     newProject: "新建项目",
@@ -78,15 +150,16 @@ export const zh = {
     statsMid: "中",
     statsLow: "低",
     deliverableList: [
-      "PDF Finding 报告",
-      "Excel Finding 清单",
-      "观察摘要 PDF",
-      "证据索引 Excel",
-      "资料解析索引 Excel",
-      "OCR Markdown / 版面 JSON",
-      "缺件清单 Excel",
-      "整改跟踪表 Excel",
+      "固定模板输出 Excel",
       "交付物 ZIP 包",
+      "PDF Finding 报告（ZIP 内）",
+      "Excel Finding 清单（ZIP 内）",
+      "观察摘要 PDF（ZIP 内）",
+      "证据索引 Excel（ZIP 内）",
+      "资料解析索引 Excel（ZIP 内）",
+      "OCR Markdown / 版面 JSON（随 ZIP 附带）",
+      "缺件清单 Excel（ZIP 内）",
+      "整改跟踪表 Excel（ZIP 内）",
     ],
     devPathShow: "服务器路径（开发）",
     devPathHide: "隐藏服务器路径",
@@ -143,8 +216,8 @@ export const zh = {
     phases: {
       planning: "主 Agent 读档预览并拆解任务，委派视觉/文本 Ingest 与子 Agent",
       classifying: "文本 Ingest 分拣资料类型",
-      vision_parsing: "视觉 Agent（GLM-OCR）读图并抽取结构化字段",
-      parsing: "OCR 与文本读档汇入资料池（parsed_docs）",
+      vision_parsing: "视觉 Agent 读取图片与 PDF 图像页，抽取结构化字段",
+      parsing: "PDF 文本层、Excel 与文档文本汇入资料池（parsed_docs）",
       extracting: "资料池持续合并视觉字段与文本实体",
       running_rules: "子 Agent 执行 CMP 规则扫描",
       cross_checking: "子 Agent 执行交叉比对与勾稽",
@@ -161,6 +234,19 @@ export const zh = {
     created: "创建",
     empty: "暂无项目",
     deleteSelected: "删除选中",
+    deleteSelectedBusy: "正在删除",
+    searchPlaceholder: "搜索项目名称、状态或摘要",
+    selectVisible: "选择当前页",
+    pageStatus: "第 {page}/{total} 页 · {count} 个项目",
+    prevPage: "上一页",
+    nextPage: "下一页",
+    noMatches: "没有匹配的项目",
+    nameRequired: "项目名称不能为空",
+    saved: "项目已保存",
+    deletedOne: "已删除「{name}」",
+    deletedSelected: "已删除 {count} 个项目",
+    deleteNone: "没有删除任何项目，请刷新后重试",
+    deletedPartial: "已删除 {deleted}/{count} 个项目，仍有 {failed} 个未删除，请重试",
     confirmDelete: "确定删除「{name}」？",
     confirmBatch: "确定删除选中的 {count} 个项目？",
   },
@@ -193,6 +279,16 @@ export const zh = {
     confirmBatch: "确定删除选中的 {count} 场子会议？",
     codeRequired: "请填写会议编码",
     creating: "创建中…",
+    searchPlaceholder: "搜索会议编码、标题、观察类型或状态",
+    selectVisible: "选择当前页",
+    pageStatus: "第 {page}/{total} 页 · {count} 场子会议",
+    prevPage: "上一页",
+    nextPage: "下一页",
+    noMatches: "没有匹配的子会议",
+    deleteSelectedBusy: "正在删除",
+    saved: "子会议已保存",
+    deletedOne: "已删除子会议 {code}",
+    deletedSelected: "已删除 {count} 场子会议",
   },
   meetingOverview: {
     title: "子会议概览",
@@ -204,13 +300,6 @@ export const zh = {
     findingsUnit: "条",
     outputs: "交付物",
     outputsUnit: "个",
-    quickLinks: "快捷入口",
-    linkFiles: "资料上传",
-    linkFindings: "Finding 清单",
-    linkOutputs: "交付验收",
-    linkLogs: "Agent 日志",
-    linkReview: "逐条复核",
-    runningLinksHint: "分析进行中 · 下方入口仅供查看",
   },
   filesPage: {
     title: "观察资料",
@@ -257,7 +346,7 @@ export const zh = {
   },
   outputsPage: {
     title: "交付验收",
-    desc: "分析完成后生成 PDF/Excel 商业交付物及 ZIP 归档包，请下载查阅后验收。",
+    desc: "主交付为固定模板 Excel；ZIP 归档包含 Finding、证据索引、缺件清单和解析材料。",
     criticHint: "交付前最后一道 Agent 质检",
     criticValidated: "已校验 {count} 条 Finding",
     criticFlagged: " · 剩余疑点 {count} 条",
@@ -266,14 +355,49 @@ export const zh = {
     criticRegen: " · 已据此重生成交付物",
     accepted: "验收已通过",
     rejected: "已退回",
+    rejectedReanalyze: "已退回并启动重新分析",
     rejectedWith: "已退回：{comment}",
-    reviewHint: "请下载并查阅 Finding 交付物。确认无误后点击验收；如需调整请退回并说明原因。",
+    reviewHint: "请优先核对固定模板 Excel 是否按观察资料填完整；需要查看证据链时下载 ZIP。确认无误后验收，需调整则退回并说明原因。",
     accept: "验收通过",
     rejectPlaceholder: "退回原因（可选）",
     reject: "退回",
     rejectReanalyze: "退回并重新分析",
     acceptFail: "验收失败，请重试",
     rejectFail: "退回失败，请重试",
+    evaluationTitle: "自动评估",
+    evaluationHint: "Harness 完成后自动对照 FX 基准样本，检查资料识别、事实抽取、143 列固定模板和交付范围。",
+    evaluationPass: "基准通过",
+    evaluationFail: "基准未通过",
+    evaluationSkipped: "未匹配基准",
+    evaluationNoCase: "无基准",
+    evaluationCase: "基准样本",
+    evaluationChecks: "通过项",
+    evaluationCritical: "严重失败",
+    evaluationWarning: "警告失败",
+    evaluationFailedChecks: "未通过检查",
+    evaluationNoIssues: "本轮未发现基准失败项",
+    evaluationGenerated: "评分时间 {time}",
+    evaluationExpected: "期望",
+    evaluationActual: "实际",
+    evaluationRootCause: "定位",
+    evaluationEvidenceFiles: "关联文件",
+    evaluationRemediation: "建议",
+    qualityTitle: "交付前质检状态",
+    qualityHint: "系统已对固定模板字段逐列评测；仍需结合原始资料人工验收。",
+    qualityPass: "通过",
+    qualityNeedsReview: "需复核",
+    qualityFail: "结构异常",
+    qualityFields: "字段评测",
+    qualityComplete: "可交付",
+    qualityMissing: "待补充",
+    qualityManual: "人工/客户",
+    qualityIssues: "优先处理字段",
+    qualityNoIssues: "未发现需要优先处理的字段",
+    qualityGenerated: "门禁时间 {time}",
+    primaryTitle: "固定模板输出",
+    primaryDesc: "最终审核结论以这份 Excel 为准，143 列应按本场观察资料、证据链和规则判断填充。",
+    archiveTitle: "证据归档包",
+    archiveDesc: "ZIP 内保留 Finding、证据索引、缺件清单、资料解析索引和过程说明，作为复核依据。",
     colType: "类型",
     colFile: "文件",
     download: "下载",
@@ -301,10 +425,41 @@ export const zh = {
   logsPage: {
     title: "Agent 日志",
     desc: "Orchestrator、子 Agent 工具调用、Critic 与交付步骤记录",
+    runEventsTitle: "实时事件流",
+    runEventsVersion: "事件版本",
+    runEventsHealth: "事件健康度",
+    runEventsTotal: "总事件",
+    runEventsTools: "工具调用",
+    runEventsFailed: "失败事件",
+    runEventsSkipped: "跳过事件",
+    runEventsDuration: "累计耗时",
+  },
+  auditPage: {
+    readiness: {
+      ready: "正常",
+      degraded: "需关注",
+      blocked: "阻塞",
+      missing: "缺失",
+      unknown: "未知",
+    },
   },
   newProject: {
     title: "新建观察项目",
     desc: "输入项目名称，创建后在项目内新建或导入子会议",
+    caseImportTitle: "导入一场观察案件",
+    caseImportHint: "选择本地观察资料文件夹，系统会按案件自动创建项目与子会议",
+    caseImportNamePlaceholder: "案件名称（可选，默认使用资料夹名称）",
+    caseImportPickFolder: "请先选择观察资料包文件夹",
+    caseImportSubmit: "导入并进入案件",
+    caseImporting: "正在导入资料…",
+    executionModeTitle: "执行方式",
+    rulesModeLabel: "规则快速审核",
+    rulesModeHint: "先完成确定性规则、交付物与缺件判断",
+    agentModeLabel: "Agent 全流程审核",
+    agentModeHint: "启用 Planner / Executor / Vision / Critic 全链路",
+    agentStatusChecking: "正在检查 Agent 状态…",
+    agentStatusReady: "Agent 已就绪，可启用全流程审核",
+    agentModeUnavailable: "Agent 暂未就绪，请先使用规则快速审核或稍后重试",
     manualTitle: "项目名称",
     manualHint: "创建空项目后，可在项目详情页管理子会议",
     manualPlaceholder: "例：2026 Q1 远程观察批次",
@@ -312,6 +467,7 @@ export const zh = {
     offline: "无法连接分析服务，请稍后重试",
     creating: "创建中…",
     enteringManual: "正在进入项目…",
+    enteringCase: "正在进入案件…",
     manualSubmit: "创建项目",
   },
   settings: {
@@ -344,6 +500,7 @@ export const zh = {
     memoryWrite: "写入",
     memoryAll: "全部",
     reindex: "重建索引",
+    reindexed: "索引已重建",
     memoryTypePreference: "用户偏好",
     memoryTypePolicy: "合规政策",
     memoryTypeFinding: "Finding 模板",
@@ -452,6 +609,7 @@ export const zh = {
       mission: "任务拆解",
       runtime: "Runtime",
       vision_agent: "视觉 Agent",
+      text_ingest: "文本 Ingest",
     } as Record<string, string>,
     logTitle: {
       plan: "Agent 执行计划",
@@ -464,6 +622,7 @@ export const zh = {
       mainAgent: "主 Agent · {name}",
       orchestrator: "任务编排",
       visionAgent: "视觉 Agent · {name}",
+      textIngest: "文本 Ingest · {name}",
       mcpTool: "MCP 工具 · {name}",
       tool: "工具 · {name}",
     },
@@ -511,6 +670,7 @@ export const zh = {
       unknown: "未识别",
     } as Record<string, string>,
     outputType: {
+      fixed_template_excel: "固定模板输出（Excel）",
       risk_excel: "Excel Finding 清单",
       risk_pdf: "PDF Finding 报告",
       finding_excel: "Excel Finding 清单",
@@ -528,11 +688,51 @@ export const zh = {
   },
 } ;
 
-type Stringify<T> = T extends string
-  ? string
-  : T extends readonly string[]
-    ? string[]
-    : { [K in keyof T]: Stringify<T[K]> };
+type TextTree = string | string[] | { [key: string]: TextTree };
+type WorkflowStepMessage = {
+  label: string;
+  short: string;
+  desc: string;
+  agentSay: string;
+  agentDone: string;
+  station: string;
+};
 
-export type Messages = Stringify<typeof zh>;
+export type Messages = {
+  [key: string]: TextTree | Record<string, unknown>;
+  workflow: {
+    steps: Record<string, WorkflowStepMessage>;
+    status: Record<string, string>;
+    logStatus: Record<string, string>;
+    logKind: Record<string, string>;
+    logTitle: Record<string, string>;
+  };
+  pipelineGraph: {
+    aria: string;
+    eyebrow: string;
+    title: string;
+    criticValidated: string;
+    criticFlagged: string;
+    criticPassed: string;
+    nodes: Record<string, { label: string; short: string }>;
+    phases: Record<string, string>;
+  };
+  mission: {
+    phases: Record<string, { label: string; short: string }>;
+    failedHeadline: string;
+    [key: string]: TextTree | Record<string, { label: string; short: string }>;
+  };
+  home: {
+    flowSteps: string[];
+    deliverableList: string[];
+    [key: string]: TextTree;
+  };
+  domain: {
+    finding: string;
+    criticAgent: string;
+    parseStatus: Record<string, string>;
+    docCategory: Record<string, string>;
+    outputType: Record<string, string>;
+  };
+} & Record<string, any>;
 export type Locale = "zh" | "en";

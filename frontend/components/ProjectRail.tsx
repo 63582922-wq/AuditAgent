@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useProjectLiveOptional } from "@/contexts/ProjectLiveContext";
 import { useI18n } from "@/lib/i18n";
-import { buildWorkflowSteps } from "@/lib/i18n/workflow-steps";
+import { buildWorkflowSteps, statusLabel } from "@/lib/i18n/workflow-steps";
 import { resolveMissionPhase } from "@/lib/mission";
 import { isPipelineRunning, resolveLiveProgress } from "@/lib/workflow";
 
@@ -15,17 +15,17 @@ export function ProjectRail({ projectId }: { projectId: string }) {
   const meetingMatch = pathname.match(/^\/projects\/[^/]+\/meetings\/([^/]+)/);
   const meetingId = meetingMatch?.[1];
   const workBase = meetingId ? `${base}/meetings/${meetingId}` : base;
-  const { live, job } = useProjectLiveOptional() ?? { live: null, job: null };
+  const { live, job, notFound } = useProjectLiveOptional() ?? { live: null, job: null, notFound: false };
 
   const workflowSteps = buildWorkflowSteps(messages);
   const running = isPipelineRunning(live?.status ?? "", job?.status);
   const pct = live ? resolveLiveProgress(live, job, workflowSteps) : 0;
   const missionPhase = live ? resolveMissionPhase(live, job) : "init";
   const missionSteps = [
-    { id: "init", num: "01", label: messages.mission.phases.init.short, href: "" },
-    { id: "ingest", num: "02", label: messages.mission.phases.ingest.short, href: "/files" },
-    { id: "processing", num: "03", label: messages.mission.phases.processing.short, href: "/risks" },
-    { id: "deliver", num: "04", label: messages.mission.phases.deliver.short, href: "/outputs" },
+    { id: "init", num: "01", label: messages.mission.phases.init.short },
+    { id: "ingest", num: "02", label: messages.mission.phases.ingest.short },
+    { id: "processing", num: "03", label: messages.mission.phases.processing.short },
+    { id: "deliver", num: "04", label: messages.mission.phases.deliver.short },
   ] as const;
   const phaseIdx =
     missionPhase === "init"
@@ -38,7 +38,9 @@ export function ProjectRail({ projectId }: { projectId: string }) {
 
   const meetingCode =
     (live?.state_json as { meeting_case?: { meeting_code?: string } } | undefined)?.meeting_case?.meeting_code ||
-    live?.name;
+    live?.name ||
+    meetingId;
+  const statusText = live ? statusLabel(live.status, messages) : t("rail.pending");
 
   const pages = [
     { suffix: "", label: t("rail.overview") },
@@ -51,25 +53,36 @@ export function ProjectRail({ projectId }: { projectId: string }) {
 
   return (
     <div className="rail">
-      <nav className="rail-crumb" aria-label={t("rail.contextLabel")}>
-        <Link href="/projects">{t("nav.projects")}</Link>
-        <span className="rail-crumb__sep">/</span>
-        {meetingId ? (
-          <>
-            <Link href={base} title={live?.name}>
-              {live?.name || t("rail.projectScope")}
-            </Link>
-            <span className="rail-crumb__sep">/</span>
-            <span className="rail-crumb__current" title={meetingCode}>
-              {meetingCode || t("rail.meetingScope")}
-            </span>
-          </>
-        ) : (
-          <span className="rail-crumb__current">{live?.name || t("rail.projectScope")}</span>
-        )}
-      </nav>
-
-      {!meetingId && <p className="rail-scope">{t("rail.projectScope")}</p>}
+      {meetingId && notFound && (
+        <section className="rail-context rail-context--danger" aria-label={t("rail.contextLabel")}>
+          <span className="rail-context__label">{t("errors.notFound")}</span>
+          <strong className="rail-context__code">{t("errors.meetingNotFound")}</strong>
+          <p>{t("errors.projectNotFound")}</p>
+          <Link href="/projects" className="rail-pages__link is-active">
+            {t("nav.backProjects")}
+          </Link>
+        </section>
+      )}
+      {meetingId && notFound ? null : (
+        <>
+      {meetingId ? (
+        <section className="rail-context" aria-label={t("rail.contextLabel")}>
+          <span className="rail-context__label">{t("rail.meetingScope")}</span>
+          <strong className="rail-context__code" title={meetingCode || undefined}>
+            {meetingCode || t("rail.pending")}
+          </strong>
+          <p>
+            {statusText} · {live?.file_count ?? 0} {t("meetingOverview.filesUnit")} ·{" "}
+            {messages.domain.finding} {live?.risk_count ?? 0} · {t("meetingOverview.outputs")}{" "}
+            {live?.output_count ?? 0}
+          </p>
+        </section>
+      ) : (
+        <section className="rail-context" aria-label={t("rail.contextLabel")}>
+          <span className="rail-context__label">{t("rail.projectScope")}</span>
+          <strong className="rail-context__code">{t("nav.meetingList")}</strong>
+        </section>
+      )}
 
       {meetingId && (
         <>
@@ -95,13 +108,13 @@ export function ProjectRail({ projectId }: { projectId: string }) {
                     : "";
               return (
                 <li key={step.id} className={state || undefined}>
-                  <Link href={`${workBase}${step.href}`} className="rail-steps__link">
+                  <div className="rail-steps__item">
                     <span>{step.num}</span>
                     <span className="rail-steps__text">
                       {step.label}
                       {suffix}
                     </span>
-                  </Link>
+                  </div>
                 </li>
               );
             })}
@@ -130,6 +143,8 @@ export function ProjectRail({ projectId }: { projectId: string }) {
             {t("nav.meetingList")}
           </Link>
         </div>
+      )}
+        </>
       )}
     </div>
   );

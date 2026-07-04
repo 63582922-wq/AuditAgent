@@ -8,6 +8,7 @@ import {
   fetchLatestJob,
   fetchProjectLive,
   isNetworkError,
+  isNotFoundError,
   api,
 } from "@/lib/api";
 import { ActivityLog } from "@/components/ActivityTimeline";
@@ -20,6 +21,8 @@ type Ctx = {
   agent: AgentStatus | null;
   traceLogs: ActivityLog[];
   offline: boolean;
+  notFound: boolean;
+  error: string;
   pendingRun: boolean;
   refresh: () => void;
   watchRun: () => void;
@@ -45,6 +48,8 @@ export function ProjectLiveProvider({
   const [agent, setAgent] = useState<AgentStatus | null>(null);
   const [traceLogs, setTraceLogs] = useState<ActivityLog[]>([]);
   const [offline, setOffline] = useState(false);
+  const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState("");
   const [boostUntil, setBoostUntil] = useState(0);
   const [pendingRun, setPendingRun] = useState(false);
   const { t } = useI18n();
@@ -72,9 +77,20 @@ export function ProjectLiveProvider({
         if (nextLive) {
           setLive(nextLive);
           setOffline(false);
+          setNotFound(false);
+          setError("");
         }
+      } else if (isNotFoundError(liveResult.reason)) {
+        setLive(null);
+        setJob(null);
+        setTraceLogs([]);
+        setOffline(false);
+        setNotFound(true);
+        setError(liveResult.reason instanceof Error ? liveResult.reason.message : t("errors.notFound"));
       } else if (isNetworkError(liveResult.reason)) {
         setOffline(true);
+      } else {
+        setError(liveResult.reason instanceof Error ? liveResult.reason.message : String(liveResult.reason));
       }
 
       if (jobResult.status === "fulfilled") {
@@ -85,7 +101,7 @@ export function ProjectLiveProvider({
       const running = isPipelineRunning(nextLive?.status ?? "", nextJob?.status);
       if (running) setPendingRun(false);
       const boosted = Date.now() < boostUntil;
-      if (includeLogs && (running || boosted)) {
+      if (includeLogs && nextLive) {
         try {
           const logPath = meetingId
             ? `/projects/${projectId}/meetings/${meetingId}/logs`
@@ -95,13 +111,13 @@ export function ProjectLiveProvider({
         } catch {
           /* logs optional */
         }
-      } else if (!running && !boosted) {
+      } else if (!includeLogs || (!running && !boosted && !nextLive)) {
         setTraceLogs([]);
       }
     } finally {
       busyRef.current = false;
     }
-  }, [boostUntil, includeLogs, meetingId, projectId]);
+  }, [boostUntil, includeLogs, meetingId, projectId, t]);
 
   useEffect(() => {
     refresh();
@@ -134,10 +150,15 @@ export function ProjectLiveProvider({
   }, [boostUntil, refresh]);
 
   return (
-    <ProjectLiveContext.Provider value={{ live, job, agent, traceLogs, offline, pendingRun, refresh, watchRun }}>
+    <ProjectLiveContext.Provider value={{ live, job, agent, traceLogs, offline, notFound, error, pendingRun, refresh, watchRun }}>
       {offline && (
         <div className="alert danger" style={{ marginBottom: "1rem" }}>
           {t("common.offline")}
+        </div>
+      )}
+      {notFound && (
+        <div className="alert danger" style={{ marginBottom: "1rem" }}>
+          {error ? `${t("errors.notFound")}：${error}` : t("errors.notFound")}
         </div>
       )}
       {children}

@@ -48,6 +48,7 @@ export const COMPLIANCE_DOC_TYPES = [
 ];
 
 export const OUTPUT_TYPE_LABELS: Record<string, string> = {
+  fixed_template_excel: "固定模板输出（Excel）",
   risk_excel: "Excel Finding 清单",
   risk_pdf: "PDF Finding 报告",
   annotated_excel: "批注 Excel",
@@ -74,15 +75,16 @@ export const PARSE_STATUS_LABELS: Record<string, string> = {
 };
 
 export const COMPLIANCE_DELIVERABLE_LABELS = [
-  "PDF Finding 报告",
-  "Excel Finding 清单",
+  "固定模板输出 Excel",
+  "交付物 ZIP 包",
+  "PDF Finding 报告（ZIP 内）",
+  "Excel Finding 清单（ZIP 内）",
   "观察摘要 PDF",
   "证据索引 Excel",
   "资料解析索引 Excel",
-  "OCR Markdown / 版面 JSON",
+  "OCR Markdown / 版面 JSON（随 ZIP 附带）",
   "缺件清单 Excel",
   "整改跟踪表 Excel",
-  "交付物 ZIP 包",
 ] as const;
 
 export function formatParseStatus(status: string): string {

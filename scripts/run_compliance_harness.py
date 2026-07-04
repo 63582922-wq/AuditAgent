@@ -39,14 +39,24 @@ def main() -> int:
             return 1
 
         if args.import_only:
-            project_id, profile = harness.import_case(case, args.name)
-            print(json.dumps({"project_id": project_id, "meeting_code": profile.get("meeting_code")}, ensure_ascii=False, indent=2))
+            project_id, meeting_id, profile = harness.import_case(case, args.name)
+            print(
+                json.dumps(
+                    {
+                        "project_id": project_id,
+                        "meeting_id": meeting_id,
+                        "meeting_code": profile.get("meeting_code"),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return 0
 
         result = harness.run_case_folder(case, args.name) if not args.skip_orchestrator else None
         if args.skip_orchestrator:
-            project_id, _ = harness.import_case(case, args.name)
-            result = harness.run(project_id, skip_orchestrator=True)
+            project_id, meeting_id, _ = harness.import_case(case, args.name)
+            result = harness.run(project_id, meeting_id, skip_orchestrator=True)
 
         print(
             json.dumps(

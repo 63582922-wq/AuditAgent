@@ -1,5 +1,6 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000/api";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
+const PRIMARY_DELIVERABLE_TYPES = new Set(["fixed_template_excel", "deliverable_package"]);
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
@@ -26,8 +27,9 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     if (res.status === 404 && path.includes("harness") && path.includes("upload")) {
       throw new Error("NOT_FOUND_UPLOAD_API");
     }
-    const err = new Error(msg) as Error & { code?: string | null };
+    const err = new Error(msg) as Error & { code?: string | null; status?: number };
     err.code = code;
+    err.status = res.status;
     throw err;
   }
   return res.json();
@@ -39,6 +41,10 @@ function isLegacyApiError(err: unknown): boolean {
 
 export function isNetworkError(err: unknown): boolean {
   return err instanceof TypeError && String(err.message).includes("fetch");
+}
+
+export function isNotFoundError(err: unknown): boolean {
+  return err instanceof Error && (err as Error & { status?: number }).status === 404;
 }
 
 export async function fetchLatestJob(projectId: string, meetingId?: string): Promise<Job | null> {
@@ -64,7 +70,7 @@ export function projectToLive(p: Project): ProjectLive {
     state_json: p.state_json,
     file_count: p.files?.length ?? 0,
     risk_count: p.risks?.length ?? 0,
-    output_count: p.outputs?.length ?? 0,
+    output_count: (p.outputs ?? []).filter((output) => PRIMARY_DELIVERABLE_TYPES.has(output.output_type)).length,
   };
 }
 
@@ -173,6 +179,74 @@ export type ProjectStateJson = {
     comment?: string;
     accepted_at?: string;
     rejected_at?: string;
+    template_quality?: {
+      status?: "pass" | "needs_review" | "fail";
+      total_fields?: number;
+      assessed_fields?: number;
+      completion_rate?: number;
+      review_required?: boolean;
+      counts?: Record<string, number>;
+      owner_counts?: Record<string, number>;
+      issue_fields?: {
+        column?: number;
+        header?: string;
+        value?: string;
+        quality?: string;
+        owner?: string;
+        evidence_type?: string;
+        handoff_required?: boolean;
+        issue?: string;
+        action?: string;
+      }[];
+      issue_field_count?: number;
+      generated_at?: string;
+    };
+    evaluation?: {
+      status?: "completed" | "skipped" | "failed";
+      case_id?: string;
+      case_name?: string;
+      meeting_code?: string;
+      passed?: boolean | null;
+      critical_failures?: number;
+      warning_failures?: number;
+      total_checks?: number;
+      passed_checks?: number;
+      reason?: string;
+      generated_at?: string;
+      failed_checks?: {
+        check_id?: string;
+        severity?: string;
+        expected?: unknown;
+        actual?: unknown;
+        message?: string;
+        diagnosis?: {
+          stage?: string;
+          root_cause?: string;
+          remediation?: string;
+          target_category?: string;
+          field?: string;
+          source_path?: string;
+          output_type?: string;
+          file_name?: string;
+          candidate_files?: {
+            file_id?: string;
+            file_name?: string;
+            current_category?: string;
+            reason?: string;
+          }[];
+          related_files?: {
+            file_id?: string;
+            file_name?: string;
+            current_category?: string;
+            related_category?: string;
+          }[];
+          loose_outputs?: {
+            output_type?: string;
+            file_name?: string;
+          }[];
+        };
+      }[];
+    };
   };
   sub_agent_briefs?: Record<
     string,
@@ -283,7 +357,7 @@ export type Meeting = {
 };
 
 export function fetchMeetings(projectId: string) {
-  return api<Meeting[]>(`/projects/${projectId}/meetings`);
+  return api<Meeting[]>(`/projects/${projectId}/meetings`, { cache: "no-store" });
 }
 
 export function createMeeting(
@@ -342,6 +416,58 @@ export function batchDeleteProjects(projectIds: string[]) {
   });
 }
 
+export type AgentChatMessage = {
+  role: "agent" | "user";
+  content: string;
+};
+
+export type AgentChatAction = {
+  id: string;
+  label: string;
+  description: string;
+  segment: string;
+  proposal_id?: string | null;
+  requires_meeting?: boolean;
+  requires_approval?: boolean;
+  tone?: "default" | "warning";
+};
+
+export type AgentChatResponse = {
+  reply: string;
+  actions: AgentChatAction[];
+  mode: "llm" | "fallback" | string;
+  context: Record<string, unknown>;
+};
+
+export function agentChat(payload: {
+  message: string;
+  project_id?: string | null;
+  meeting_id?: string | null;
+  history?: AgentChatMessage[];
+}) {
+  return api<AgentChatResponse>("/agent/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export type AgentActionApproveResponse = {
+  ok: boolean;
+  proposal_id: string;
+  action_id: string;
+  status: string;
+  message?: string;
+  job_id?: string;
+};
+
+export function approveAgentAction(proposalId: string, comment?: string) {
+  const trimmedComment = comment?.trim();
+  return api<AgentActionApproveResponse>(`/agent/actions/${proposalId}/approve`, {
+    method: "POST",
+    body: JSON.stringify(trimmedComment ? { comment: trimmedComment } : {}),
+  });
+}
+
 export type Job = {
   id: string;
   project_id: string;
@@ -352,9 +478,92 @@ export type Job = {
   error_message?: string;
 };
 
+export type RunEvent = {
+  id: string;
+  step: string;
+  status: string;
+  kind: string;
+  category: string;
+  severity: string;
+  name: string;
+  message: string;
+  duration_ms?: number | null;
+  created_at?: string | null;
+  detail?: Record<string, unknown>;
+};
+
+export type RunEventsSnapshot = {
+  available: boolean;
+  version: string;
+  project_id: string;
+  meeting_id: string;
+  summary: {
+    event_count: number;
+    tool_event_count: number;
+    failed_event_count: number;
+    running_event_count: number;
+    open_running_event_count: number;
+    skipped_event_count: number;
+    duration_ms_total: number;
+    status_counts: Record<string, number>;
+    category_counts: Record<string, number>;
+    first_event_at?: string | null;
+    last_event_at?: string | null;
+  };
+  health: {
+    level: string;
+    signals: string[];
+  };
+  events: RunEvent[];
+};
+
+export function emptyRunEventsSnapshot(projectId: string, meetingId: string): RunEventsSnapshot {
+  return {
+    available: false,
+    version: "",
+    project_id: projectId,
+    meeting_id: meetingId,
+    summary: {
+      event_count: 0,
+      tool_event_count: 0,
+      failed_event_count: 0,
+      running_event_count: 0,
+      open_running_event_count: 0,
+      skipped_event_count: 0,
+      duration_ms_total: 0,
+      status_counts: {},
+      category_counts: {},
+    },
+    health: {
+      level: "blocked",
+      signals: ["no_events"],
+    },
+    events: [],
+  };
+}
+
+export function fetchMeetingRunEvents(projectId: string, meetingId: string) {
+  return api<RunEventsSnapshot>(`/projects/${projectId}/meetings/${meetingId}/run-events`, {
+      cache: "no-store",
+    })
+    .catch((e) => {
+    if (isLegacyApiError(e) || isNetworkError(e)) return emptyRunEventsSnapshot(projectId, meetingId);
+    throw e;
+    });
+}
+
+export function cancelJob(projectId: string, jobId: string, meetingId?: string) {
+  const path = meetingId
+    ? `/projects/${projectId}/meetings/${meetingId}/jobs/${jobId}/cancel`
+    : `/projects/${projectId}/jobs/${jobId}/cancel`;
+  return api<Job>(path, { method: "POST" });
+}
+
 export type AgentStatus = {
   mode: string;
   ready: boolean;
+  rules_ready?: boolean;
+  full_agent_ready?: boolean;
   message: string;
   agent_domain?: string;
   domain_label?: string;
@@ -444,6 +653,23 @@ export type HarnessResult = {
   message?: string;
 };
 
+export type HarnessRunOptions = {
+  skipOrchestrator?: boolean;
+  orchestratorMaxTasks?: number;
+  visionMaxFiles?: number;
+  runMode?: string;
+};
+
+function harnessRunPayload(options?: boolean | HarnessRunOptions) {
+  const normalized = typeof options === "boolean" ? { skipOrchestrator: options } : options || {};
+  return {
+    skip_orchestrator: Boolean(normalized.skipOrchestrator),
+    orchestrator_max_tasks: normalized.orchestratorMaxTasks,
+    vision_max_files: normalized.visionMaxFiles,
+    run_mode: normalized.runMode,
+  };
+}
+
 export function harnessImportCase(casePath: string, projectName?: string) {
   return api<HarnessResult>("/harness/import", {
     method: "POST",
@@ -468,7 +694,11 @@ function inferMeetingCodeFromFiles(files: File[]): string {
   return m ? m[0].toUpperCase() : "UNKNOWN";
 }
 
-async function harnessRunCaseUploadFallback(files: File[], projectName?: string): Promise<HarnessResult> {
+async function harnessRunCaseUploadFallback(
+  files: File[],
+  projectName?: string,
+  options?: HarnessRunOptions
+): Promise<HarnessResult> {
   const code = inferMeetingCodeFromFiles(files);
   const project = await api<Project>("/projects", {
     method: "POST",
@@ -482,12 +712,16 @@ async function harnessRunCaseUploadFallback(files: File[], projectName?: string)
   const meetings = await fetchMeetings(project.id);
   const meetingId = meetings[0]?.id;
   if (!meetingId) throw new Error("子会议创建失败");
-  return harnessRunProject(project.id, meetingId);
+  return harnessRunProject(project.id, meetingId, options);
 }
 
-export function harnessRunCaseUpload(files: File[], projectName?: string) {
+export function harnessRunCaseUpload(files: File[], projectName?: string, options?: HarnessRunOptions) {
   const form = new FormData();
   if (projectName?.trim()) form.append("project_name", projectName.trim());
+  form.append("skip_orchestrator", options?.skipOrchestrator ? "true" : "false");
+  if (options?.orchestratorMaxTasks != null) form.append("orchestrator_max_tasks", String(options.orchestratorMaxTasks));
+  if (options?.visionMaxFiles != null) form.append("vision_max_files", String(options.visionMaxFiles));
+  if (options?.runMode) form.append("run_mode", options.runMode);
   for (const file of files) {
     const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
     form.append("files", file, rel);
@@ -497,10 +731,10 @@ export function harnessRunCaseUpload(files: File[], projectName?: string) {
     body: form,
   }).catch((err) => {
     if (err instanceof Error && err.message === "NOT_FOUND_UPLOAD_API") {
-      return harnessRunCaseUploadFallback(files, projectName);
+      return harnessRunCaseUploadFallback(files, projectName, options);
     }
     if (err instanceof Error && err.message === "Not Found") {
-      return harnessRunCaseUploadFallback(files, projectName);
+      return harnessRunCaseUploadFallback(files, projectName, options);
     }
     throw err;
   });
@@ -537,10 +771,29 @@ export function harnessImportToProject(
   });
 }
 
-export function harnessRunProject(projectId: string, meetingId: string, skipOrchestrator = false) {
+export function harnessRunProject(projectId: string, meetingId: string, options?: boolean | HarnessRunOptions) {
   return api<HarnessResult>(`/projects/${projectId}/meetings/${meetingId}/harness/run`, {
     method: "POST",
-    body: JSON.stringify({ skip_orchestrator: skipOrchestrator }),
+    body: JSON.stringify(harnessRunPayload(options)),
+  });
+}
+
+export function harnessSupplementMeetingUpload(
+  projectId: string,
+  meetingId: string,
+  files: File[],
+  options?: { runAnalysis?: boolean; skipOrchestrator?: boolean }
+) {
+  const form = new FormData();
+  form.append("run_analysis", options?.runAnalysis === false ? "false" : "true");
+  form.append("skip_orchestrator", options?.skipOrchestrator ? "true" : "false");
+  for (const file of files) {
+    const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+    form.append("files", file, rel);
+  }
+  return api<HarnessResult>(`/projects/${projectId}/meetings/${meetingId}/harness/supplement-upload`, {
+    method: "POST",
+    body: form,
   });
 }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { LiveWorkflowGraph } from "@/components/LiveWorkflowGraph";
 import { useProjectLive } from "@/contexts/ProjectLiveContext";
 import { useI18n } from "@/lib/i18n";
@@ -12,8 +13,21 @@ type Props = {
 };
 
 export function SettlingStage({ basePath }: Props) {
-  const { live, job, pendingRun } = useProjectLive();
+  const { live, job, pendingRun, notFound, error, traceLogs } = useProjectLive();
   const { t, messages } = useI18n();
+
+  if (notFound) {
+    return (
+      <section className="settling-stage settling-stage--empty" aria-live="polite">
+        <p className="settling-stage__kicker">{t("errors.notFound")}</p>
+        <h1 className="settling-stage__title">{t("errors.meetingNotFound")}</h1>
+        <p className="settling-stage__desc">{error || t("errors.projectNotFound")}</p>
+        <Link href="/projects" className="btn btn-outline">
+          {t("nav.backProjects")}
+        </Link>
+      </section>
+    );
+  }
 
   if (!live) {
     return (
@@ -57,6 +71,7 @@ export function SettlingStage({ basePath }: Props) {
         job={job}
         livePulse={isPipelineRunning(live.status, job?.status)}
         className="settling-stage__graph"
+        traceLogs={traceLogs}
       />
     </section>
   );

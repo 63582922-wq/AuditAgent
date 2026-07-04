@@ -71,11 +71,26 @@ def _pick_assignee(sub_agents: List[Dict[str, Any]], candidates: tuple[str, ...]
     return None
 
 
+def _plan_items_text(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return "、".join(part for part in (_plan_items_text(item) for item in value) if part)
+    if isinstance(value, dict):
+        return "、".join(part for part in (_plan_items_text(item) for item in value.values()) if part)
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except TypeError:
+        return str(value)
+
+
 def build_default_mission(files: List[FileRecord], agent_plan: Dict[str, Any]) -> MissionPlan:
     pack = get_domain_pack()
     sub_agents = agent_plan.get("sub_agents") or route_sub_agents(files, agent_plan)
     _, vision_files = split_files_by_modality(files)
-    focus = "、".join(agent_plan.get("focus_areas") or []) or "、".join(pack.planner_focus)
+    focus = _plan_items_text(agent_plan.get("focus_areas")) or "、".join(pack.planner_focus)
     reasoning = agent_plan.get("reasoning") or (
         f"主 Agent（DeepSeek）拆解任务与汇总交付；"
         f"{'视觉 Agent（GLM）处理图片，' if vision_files else ''}"

@@ -1,12 +1,36 @@
 from __future__ import annotations
 
+import inspect
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
 from sqlalchemy.orm import Session
 
 from app.models import AgentRunLog
+
+
+def trace_code_location(skip_modules: set[str] | None = None) -> dict[str, Any]:
+    """Return the first non-trace caller so UI logs can point to code-level origin."""
+    skip_modules = skip_modules or set()
+    root = Path(__file__).resolve().parents[4]
+    for frame in inspect.stack()[1:]:
+        module = frame.frame.f_globals.get("__name__", "")
+        if module == __name__ or module in skip_modules:
+            continue
+        filename = Path(frame.filename).resolve()
+        try:
+            rel = filename.relative_to(root)
+        except ValueError:
+            rel = filename
+        return {
+            "file": str(rel),
+            "line": frame.lineno,
+            "function": frame.function,
+            "module": module,
+        }
+    return {}
 
 
 class AgentTrace:
@@ -31,6 +55,7 @@ class AgentTrace:
         payload: Dict[str, Any] = {"kind": kind, "name": name or step, "message": message}
         if detail:
             payload.update(detail)
+        payload.setdefault("code_location", trace_code_location())
         self.db.add(
             AgentRunLog(
                 project_id=self.project_id,

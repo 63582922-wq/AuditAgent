@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -14,6 +15,7 @@ from app.models import (
     ExtractedEntity,
     FileRecord,
     Memory,
+    Meeting,
     Output,
     ParsedDocument,
     Project,
@@ -23,7 +25,7 @@ from app.models import (
 )
 from app.services.agent.llm_client import require_agent_llm
 from app.services.agent.adjudicator import adjudicate_risks
-from app.services.agent.agent_trace import AgentTrace
+from app.services.agent.agent_trace import AgentTrace, trace_code_location
 from app.services.agent.execution_graph import ExecutionGraph
 from app.services.agent.incremental_replan import build_incremental_plan, diff_uploaded_files
 from app.services.agent.planner import plan_analysis
@@ -44,16 +46,131 @@ from app.services.outputs.compliance_deliverables import (
     generate_generic_correction_excel,
     generate_generic_missing_excel,
 )
+from app.services.outputs.template_quality import compact_template_quality, load_template_quality_json
 from app.services.outputs.material_layout_deliverables import collect_parsed_materials
 from app.services.outputs.excel_report import generate_risk_excel
 from app.services.outputs.pdf_report import generate_pdf_report
+from app.services.parsed_document_store import upsert_parsed_document
 from app.services.domain.registry import get_domain_pack
+from app.services.domain.compliance.constants import PRIMARY_DELIVERABLE_TYPES
+from app.services.domain.compliance.cross_checker import (
+    build_case_facts as build_compliance_case_facts,
+    run_compliance_checks,
+)
+from app.services.domain.compliance.finding_generator import generate_finding_narratives
 from app.services.record_linker import build_record_links, links_to_cross_risks
 from app.services.risk_scorer import calculate_risk_score
 from app.services.rule_engine import run_rules_on_fields, run_rules_on_rows
 from app.services.agent.meeting_scope import scoped_delete, scoped_query
 
 CROSS_RISK_PREFIXES = ("AMT-", "INV-", "CROSS-", "3WAY-", "LINK-", "ANOM-")
+
+
+def _existing_file_path(path_value: str | Path) -> Path | None:
+    path = Path(path_value)
+    if path.exists():
+        return path
+    if not path.is_absolute():
+        legacy_path = Path(__file__).resolve().parents[4] / path
+        if legacy_path.exists():
+            return legacy_path
+    return None
+
+
+def _state_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def _state_attendee_count(value: object) -> object | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    combo = re.search(r"(\d{1,3})\D{0,10}[+＋]\D{0,8}(\d{1,4})\s*人次", text)
+    if combo:
+        return f"{int(combo.group(1))}+{int(combo.group(2))}人次"
+    return _state_int(value)
+
+
+def _material_code_from_template(value: object) -> tuple[str, str]:
+    text = str(value or "").strip()
+    if not text:
+        return "", ""
+    patterns = (
+        r"(?<![A-Z0-9])(?:P|NP)-[A-Z0-9][A-Z0-9.\-]*-\d{4}\.\d{2}-\d+(?![A-Z0-9])",
+        r"(?<![A-Z0-9])M-CN-\d+(?![A-Z0-9])",
+        r"(?<![A-Z0-9])Promotional-[^\s，,。；;]+",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            code = match.group(0)
+            topic = text.replace(code, "")
+            topic = re.sub(r"valid\s*until\s*20\d{2}[./-]\d{1,2}", "", topic, flags=re.I)
+            topic = re.sub(r"\s+", " ", topic.replace("\n", " ")).strip(" \n\r\t-—:：")
+            return topic, code
+    return text, ""
+
+
+def _meeting_case_patch_from_fixed_template(path: Path) -> dict[str, object]:
+    from openpyxl import load_workbook
+
+    if not path.exists():
+        return {}
+    ws = load_workbook(path, data_only=True).active
+    header_row = 1
+    for row_idx in range(1, min(ws.max_row, 6) + 1):
+        values = [str(ws.cell(row_idx, col).value or "") for col in range(1, ws.max_column + 1)]
+        joined = "\n".join(values)
+        if "会议编码" in joined and ("PPT主题" in joined or "实际会议地点" in joined):
+            header_row = row_idx
+            break
+    data_row = header_row + 1
+    patch: dict[str, object] = {}
+
+    for col in range(1, ws.max_column + 1):
+        header = str(ws.cell(header_row, col).value or "")
+        value = ws.cell(data_row, col).value
+        if value in (None, ""):
+            continue
+        if header == "会议编码":
+            patch["meeting_code"] = str(value)
+        elif "实际会议地点" in header and "线上平台" in header:
+            patch["actual_platform"] = str(value)
+        elif header.startswith("开始时人数"):
+            number = _state_attendee_count(value)
+            if number is not None:
+                key = "template_start_attendee_count" if isinstance(number, str) else "start_attendee_count"
+                patch[key] = number
+        elif header.startswith("会中最大人数"):
+            number = _state_attendee_count(value)
+            if number is not None:
+                key = "template_max_attendee_count" if isinstance(number, str) else "max_attendee_count"
+                patch[key] = number
+        elif header.startswith("结束时人数"):
+            number = _state_attendee_count(value)
+            if number is not None:
+                key = "template_end_attendee_count" if isinstance(number, str) else "end_attendee_count"
+                patch[key] = number
+        elif header == "PPT主题及编码":
+            topic, code = _material_code_from_template(value)
+            if topic:
+                patch["presentation_topic"] = topic
+            if code:
+                patch["material_code"] = code
+        elif header == "PPT页数":
+            number = _state_int(value)
+            if number is not None:
+                patch["ppt_pages"] = number
+        elif header.startswith("是否问题会议"):
+            number = _state_int(value)
+            if number is not None:
+                patch["is_problem_meeting"] = number
+    return patch
 
 
 def _is_cross_derived_risk(rule_triggered: str | None) -> bool:
@@ -119,6 +236,15 @@ class AgentWorkflow:
     def _q(self, model):
         return scoped_query(self.db, model, self.project_id, self.meeting_id)
 
+    def _missing_documents_for_present(self, present: set[str]) -> list[dict]:
+        project = self.db.get(Project, self.project_id)
+        pack = get_domain_pack(project)
+        if pack.name == "compliance":
+            meeting = self.db.get(Meeting, self.meeting_id) if self.meeting_id else None
+            meeting_case = dict((meeting.state_json or {}).get("meeting_case") or {}) if meeting else {}
+            return check_missing_documents(set(present), domain="compliance", meeting_case=meeting_case)
+        return check_missing_documents(set(present))
+
     def run(self) -> None:
         project = self.db.get(Project, self.project_id)
         if not project:
@@ -161,6 +287,7 @@ class AgentWorkflow:
                 trace.step("parsing", "running")
                 for i, f in enumerate(files):
                     content = self._parse_file(f)
+                    self._log_pdf_vision_slices(trace, f, content)
                     headers = []
                     if content.get("sheets"):
                         headers = [c["name"] for c in content["sheets"][0].get("columns", [])]
@@ -171,7 +298,8 @@ class AgentWorkflow:
                         f.document_category = reclassify["document_category"]
                         f.confidence = reclassify["confidence"]
                         f.meta_json = reclassify
-                    pd = ParsedDocument(
+                    upsert_parsed_document(
+                        self.db,
                         project_id=self.project_id,
                         meeting_id=self.meeting_id,
                         file_id=f.id,
@@ -179,7 +307,6 @@ class AgentWorkflow:
                         content_json=content,
                         text_content=content.get("text_content", ""),
                     )
-                    self.db.merge(pd)
                     f.parse_status = "done"
                     self.db.commit()
                     parsed_docs.append(
@@ -320,6 +447,8 @@ class AgentWorkflow:
                             )
                         )
 
+                compliance_risks = self._run_compliance_domain_checks(project, files, parsed_docs, rules)
+                all_risks.extend(compliance_risks)
                 trace.step("running_rules", "completed", {"rule_hits": len(all_risks)})
             else:
                 trace.step("running_rules", "skipped", {"reason": "plan_steps or no parsed docs"})
@@ -343,7 +472,7 @@ class AgentWorkflow:
                 trace.step("cross_checking", "skipped", {"reason": "plan_steps or no parsed docs"})
 
             present = {d["document_category"] for d in parsed_docs}
-            missing = check_missing_documents(present)
+            missing = self._missing_documents_for_present(present)
 
             if graph.should_run("adjudicating"):
                 self._set_status(project, "adjudicating")
@@ -580,6 +709,7 @@ class AgentWorkflow:
                 self._set_status(project, "parsing")
                 for i, f in enumerate(new_files):
                     content = self._parse_file(f)
+                    self._log_pdf_vision_slices(trace, f, content)
                     headers = []
                     if content.get("sheets"):
                         headers = [c["name"] for c in content["sheets"][0].get("columns", [])]
@@ -590,7 +720,8 @@ class AgentWorkflow:
                         f.document_category = reclassify["document_category"]
                         f.confidence = reclassify["confidence"]
                         f.meta_json = reclassify
-                    pd = ParsedDocument(
+                    upsert_parsed_document(
+                        self.db,
                         project_id=self.project_id,
                         meeting_id=self.meeting_id,
                         file_id=f.id,
@@ -598,7 +729,6 @@ class AgentWorkflow:
                         content_json=content,
                         text_content=content.get("text_content", ""),
                     )
-                    self.db.merge(pd)
                     f.parse_status = "done"
                     self.db.commit()
                     if len(new_files) > 0:
@@ -704,7 +834,7 @@ class AgentWorkflow:
                     all_risks.extend(detect_amount_anomalies(expense_rows))
 
             present = {d["document_category"] for d in parsed_docs}
-            missing = check_missing_documents(present)
+            missing = self._missing_documents_for_present(present)
 
             if graph.should_run("adjudicating"):
                 self._set_status(project, "adjudicating")
@@ -854,6 +984,35 @@ class AgentWorkflow:
                             )
         return invoice_rows, expense_rows
 
+    def _run_compliance_domain_checks(
+        self,
+        project: Project,
+        files: list[FileRecord],
+        parsed_docs: list[dict],
+        rules: list[Rule],
+    ) -> list[dict]:
+        if get_domain_pack(project).name != "compliance":
+            return []
+
+        meeting = self.db.get(Meeting, self.meeting_id) if self.meeting_id else None
+        state_owner = meeting or project
+        state = dict(state_owner.state_json or {})
+        meeting_case = dict(state.get("meeting_case") or {})
+        facts = build_compliance_case_facts(meeting_case, files, parsed_docs)
+        hits = run_compliance_checks(facts, rules)
+        observation_type = str(facts.get("observation_type") or meeting_case.get("observation_type") or "远程观察")
+        risks = generate_finding_narratives(hits, {**meeting_case, **facts}, observation_type)
+
+        state["meeting_case"] = {**meeting_case, **facts, "finding_count": len(risks)}
+        state["agent_domain"] = "compliance"
+        state_owner.state_json = state
+        if meeting:
+            meeting.observation_type = facts.get("observation_type") or meeting.observation_type
+            meeting.meeting_type = facts.get("meeting_type") or meeting.meeting_type
+            meeting.meeting_code = facts.get("meeting_code") or meeting.meeting_code
+        self.db.commit()
+        return risks
+
     def _persist_risks(self, all_risks: list[dict]) -> None:
         scoped_delete(self.db, Risk, self.project_id, self.meeting_id)
         for r in all_risks:
@@ -912,6 +1071,34 @@ class AgentWorkflow:
                 return analyze_compliance_image(path, f.document_category or "unknown", f.file_name)
             return parse_image(path)
         return {"file_type": "unknown", "text_content": ""}
+
+    def _log_pdf_vision_slices(self, trace: AgentTrace, f: FileRecord, content: dict) -> None:
+        """Expose PDF image-page OCR as vision-agent work, even though PDF ingest starts in parsing."""
+        if content.get("file_type") != "pdf":
+            return
+        slices = content.get("vision_slices") or []
+        if not slices:
+            return
+        page_count = len({s.get("page_number") for s in slices if s.get("page_number")})
+        modes = sorted({str(s.get("ingest_mode") or "") for s in slices if s.get("ingest_mode")})
+        trace.log(
+            "vision_agent",
+            "completed",
+            kind="vision_agent",
+            name="视觉 Agent",
+            message=f"PDF 图像页识别 {f.file_name}",
+            detail={
+                "file_id": f.id,
+                "file_name": f.file_name,
+                "category": f.document_category,
+                "pdf_type": content.get("pdf_type"),
+                "ingest_mode": content.get("ingest_mode"),
+                "ocr_engine": content.get("ocr_engine"),
+                "vision_slice_count": len(slices),
+                "vision_page_count": page_count,
+                "vision_modes": modes,
+            },
+        )
 
     def _load_rules(self) -> list[dict]:
         db_rules = (
@@ -1014,11 +1201,12 @@ class AgentWorkflow:
         }
         pack = get_domain_pack(project)
         if is_compliance and pack.name == "compliance":
-            missing = [
-                {"document_type": doc_type, "importance": importance, "reason": reason}
-                for doc_type, importance, reason in pack.required_docs
-                if doc_type not in present
-            ]
+            meeting_case_for_missing = state.get("meeting_case") or {}
+            missing = check_missing_documents(
+                set(present),
+                domain="compliance",
+                meeting_case=meeting_case_for_missing,
+            )
 
         if is_compliance:
             meeting_case = state.get("meeting_case") or {}
@@ -1033,17 +1221,42 @@ class AgentWorkflow:
                 file_names=file_names,
                 parsed_materials=parsed_materials,
             )
-            type_aliases = {
-                "finding_pdf": ["finding_pdf", "risk_pdf"],
-                "finding_excel": ["finding_excel", "risk_excel"],
-            }
-            for otype, path in bundle.items():
-                if otype == "deliverable_readme":
-                    self._save_output(project, "deliverable_readme", path)
-                    continue
-                aliases = type_aliases.get(otype, [otype])
-                for alias in aliases:
-                    self._save_output(project, alias, path)
+            fixed_template_path = bundle.get("fixed_template_excel")
+            fixed_template_patch = (
+                _meeting_case_patch_from_fixed_template(fixed_template_path)
+                if fixed_template_path
+                else {}
+            )
+            template_quality = {}
+            quality_json_path = bundle.get("fixed_template_quality_json")
+            if quality_json_path and Path(quality_json_path).exists():
+                template_quality = compact_template_quality(load_template_quality_json(Path(quality_json_path)))
+            if fixed_template_patch:
+                state = dict(state)
+                next_meeting_case = dict(state.get("meeting_case") or {})
+                next_meeting_case.update(fixed_template_patch)
+                state["meeting_case"] = next_meeting_case
+                if meeting:
+                    meeting.state_json = state
+            if template_quality:
+                deliverable = dict((meeting.deliverable_json if meeting else None) or state.get("deliverable") or {})
+                deliverable.setdefault("status", "pending")
+                deliverable.setdefault("comment", "")
+                deliverable["template_quality"] = template_quality
+                state = dict(state)
+                state["deliverable"] = deliverable
+                if meeting:
+                    meeting.deliverable_json = deliverable
+                    meeting.state_json = state
+            output_q = self.db.query(Output).filter_by(project_id=project.id)
+            if self.meeting_id:
+                output_q = output_q.filter_by(meeting_id=self.meeting_id)
+            output_q.delete(synchronize_session=False)
+            self.db.commit()
+            for otype in PRIMARY_DELIVERABLE_TYPES:
+                path = bundle.get(otype)
+                if path:
+                    self._save_output(project, otype, path)
         else:
             excel_path = out_dir / "风险清单.xlsx"
             generate_risk_excel(risk_dicts, excel_path)
@@ -1057,29 +1270,38 @@ class AgentWorkflow:
             correction_path = out_dir / "整改建议清单.xlsx"
             generate_generic_correction_excel(risk_dicts, correction_path)
             self._save_output(project, "correction_list", correction_path)
-        for f in files:
-            if f.file_type != "excel":
-                continue
-            if Path(f.file_name).suffix.lower() not in (".xlsx", ".xls", ".xlsm"):
-                continue
-            annotated = out_dir / f"批注_{f.file_name}"
-            file_risks = [rd for rd in risk_dicts if rd.get("source_location_json")]
-            annotate_excel(Path(f.storage_path), file_risks, annotated)
-            self._save_output(project, "annotated_excel", annotated)
+        if not is_compliance:
+            for f in files:
+                if f.file_type != "excel":
+                    continue
+                if Path(f.file_name).suffix.lower() not in (".xlsx", ".xls", ".xlsm"):
+                    continue
+                annotated = out_dir / f"批注_{f.file_name}"
+                file_risks = [rd for rd in risk_dicts if rd.get("source_location_json")]
+                source_path = _existing_file_path(f.storage_path)
+                if not source_path:
+                    continue
+                annotate_excel(source_path, file_risks, annotated)
+                self._save_output(project, "annotated_excel", annotated)
 
-        for f in files:
-            if f.file_type != "image":
-                continue
-            ann_path = out_dir / f"标注_{f.file_name}"
-            anns = [{"bbox": None, "text": r.problem} for r in risks if r.source_file_id == f.id]
-            if anns:
-                annotate_image(Path(f.storage_path), anns, ann_path)
-                self._save_output(project, "annotated_image", ann_path)
+            for f in files:
+                if f.file_type != "image":
+                    continue
+                ann_path = out_dir / f"标注_{f.file_name}"
+                anns = [{"bbox": None, "text": r.problem} for r in risks if r.source_file_id == f.id]
+                if anns:
+                    source_path = _existing_file_path(f.storage_path)
+                    if not source_path:
+                        continue
+                    annotate_image(source_path, anns, ann_path)
+                    self._save_output(project, "annotated_image", ann_path)
 
         st = dict(project.state_json or {})
         st["missing_documents"] = missing
         if is_compliance:
             st["present_categories"] = sorted(present)
+            if "meeting_case" in state:
+                st["meeting_case"] = state["meeting_case"]
         project.state_json = st
         project.summary = self._build_summary(risk_dicts, missing)
         self.db.commit()
@@ -1141,13 +1363,15 @@ class AgentWorkflow:
 
     def _log(self, step: str, status: str, detail: dict | None = None) -> None:
         started = time.time()
+        detail_json = dict(detail or {})
+        detail_json.setdefault("code_location", trace_code_location())
         self.db.add(
             AgentRunLog(
                 project_id=self.project_id,
                 meeting_id=self.meeting_id,
                 step=step,
                 status=status,
-                detail_json=detail,
+                detail_json=detail_json,
                 duration_ms=int((time.time() - started) * 1000),
             )
         )

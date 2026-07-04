@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Iterable, List, Set
 
 from app.models import FileRecord
@@ -59,7 +60,7 @@ def route_sub_agents(
 ) -> List[Dict[str, Any]]:
     plan = plan or {}
     present = {f.document_category for f in files if f.document_category and f.document_category != "unknown"}
-    focus_text = " ".join(plan.get("focus_areas") or []) + " ".join(plan.get("priority_actions") or [])
+    focus_text = f"{_plan_items_text(plan.get('focus_areas'))} {_plan_items_text(plan.get('priority_actions'))}"
 
     scored: List[tuple[int, str, Dict[str, Any]]] = []
     for agent_id, cfg in SUB_AGENT_DEFS.items():
@@ -89,6 +90,21 @@ def route_sub_agents(
         }
         for score, agent_id, cfg in active
     ]
+
+
+def _plan_items_text(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_plan_items_text(item) for item in value)
+    if isinstance(value, dict):
+        return " ".join(_plan_items_text(item) for item in value.values())
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except TypeError:
+        return str(value)
 
 
 def pick_sub_agent_for_risk(risk: Dict[str, Any], sub_agents: List[Dict[str, Any]]) -> Dict[str, Any] | None:

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from types import SimpleNamespace
 
 import fitz
 from PIL import Image
 
+from app.services.agent.workflow import AgentWorkflow
 from app.services.parsers.pdf_ingest_splitter import (
     MIN_PAGE_TEXT_CHARS,
     _classify_page,
@@ -94,3 +96,64 @@ def test_ingest_scanned_pdf_queues_vision_page(tmp_path: Path, monkeypatch):
     assert len(result.vision_slices) == 1
     assert calls == ["vision_page"]
     assert result.vision_slices[0]["content_json"]["fields"]["actual_sign_in_count"] == 5
+
+
+def test_compliance_key_text_pdf_still_queues_page_vision_review(tmp_path: Path, monkeypatch):
+    pdf = tmp_path / "a1.pdf"
+    _write_text_pdf(pdf, ["A1 Platform 会议编号：A1P260307357 会议人数：总人数：7 " * 12])
+
+    calls = []
+
+    def fake_analyze(image, document_category, file_name, **kwargs):
+        calls.append((document_category, kwargs.get("ingest_mode")))
+        return {
+            "file_type": "image",
+            "text_content": "视觉复核：A1 会议导出页面",
+            "fields": {"meeting_code": "A1P260307357"},
+            "ocr_engine": "vision:test",
+        }
+
+    monkeypatch.setattr(
+        "app.services.parsers.pdf_ingest_splitter._analyze_slice_compliance",
+        fake_analyze,
+    )
+
+    result = ingest_pdf_hybrid(pdf, "a1_meeting_export", "a1.pdf", domain="compliance")
+
+    assert result.pdf_type == "hybrid"
+    assert result.ingest_mode == "hybrid"
+    assert len(result.vision_slices) == 1
+    assert calls == [("a1_meeting_export", "vision_page_review")]
+    assert result.vision_slices[0]["content_json"]["fields"]["meeting_code"] == "A1P260307357"
+
+
+def test_workflow_logs_pdf_vision_slices_as_vision_agent_event():
+    events = []
+
+    class Trace:
+        def log(self, *args, **kwargs):
+            events.append((args, kwargs))
+
+    workflow = AgentWorkflow.__new__(AgentWorkflow)
+    file_record = SimpleNamespace(id="file-1", file_name="scan.pdf", document_category="sign_in_record")
+    content = {
+        "file_type": "pdf",
+        "pdf_type": "scanned",
+        "ingest_mode": "vision_only",
+        "ocr_engine": "vision:test",
+        "vision_slices": [
+            {"page_number": 1, "ingest_mode": "vision_page"},
+            {"page_number": 2, "ingest_mode": "vision_page"},
+        ],
+    }
+
+    workflow._log_pdf_vision_slices(Trace(), file_record, content)
+
+    assert len(events) == 1
+    args, kwargs = events[0]
+    assert args == ("vision_agent", "completed")
+    assert kwargs["kind"] == "vision_agent"
+    assert kwargs["message"] == "PDF 图像页识别 scan.pdf"
+    assert kwargs["detail"]["vision_slice_count"] == 2
+    assert kwargs["detail"]["vision_page_count"] == 2
+    assert kwargs["detail"]["pdf_type"] == "scanned"

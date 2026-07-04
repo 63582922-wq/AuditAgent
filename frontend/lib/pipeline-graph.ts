@@ -6,7 +6,14 @@
  *                                          └→ 比对 → [子Agent…] ──┴→ 研判 → Critic → 交付
  */
 
-import { WorkflowStepId, getStepStates, overallProgress } from "@/lib/workflow";
+import type { ActivityLog } from "@/components/ActivityTimeline";
+import {
+  deriveLogGraphSignals,
+  mergeSubAgentsFromLogs,
+  primaryNodeFromJobStep,
+  syncGraphWithLogs,
+} from "@/lib/pipeline-graph-logs";
+import { WorkflowStepId, getStepStates, isPipelineRunning, overallProgress } from "@/lib/workflow";
 import { agentLabel } from "@/lib/domain";
 
 export type GraphNodeKind = "stage" | "agent" | "gate" | "vision" | "ingest" | "pool";
@@ -26,17 +33,17 @@ export type GraphEdgeDef = {
   to: string;
 };
 
-/** 固定布局（viewBox 980×440）
- *  OCR/读档 x=292 居中于主Agent(148)与资料池(436)
- *  规则/比对 x=580 居中于资料池(436)与研判(724) */
+/** 固定状态拓扑（渲染层 viewBox 920×720）
+ *  AgentGraph 将状态拓扑映射为知识图谱视图：上半区承载 Agent 链路，下半区承载全量日志事件映射。
+ */
 export const PIPELINE_NODES: GraphNodeDef[] = [
   {
     id: "upload",
     label: "资料入库",
     short: "入库",
     kind: "stage",
-    x: 52,
-    y: 220,
+    x: 106,
+    y: 318,
     stepIds: ["uploaded"],
   },
   {
@@ -44,8 +51,8 @@ export const PIPELINE_NODES: GraphNodeDef[] = [
     label: "主 Agent",
     short: "主",
     kind: "agent",
-    x: 148,
-    y: 220,
+    x: 228,
+    y: 318,
     stepIds: ["planning", "adjudicating", "generating_report"],
   },
   {
@@ -53,8 +60,8 @@ export const PIPELINE_NODES: GraphNodeDef[] = [
     label: "视觉 Agent",
     short: "OCR",
     kind: "vision",
-    x: 292,
-    y: 88,
+    x: 338,
+    y: 170,
     stepIds: ["vision_parsing"],
   },
   {
@@ -62,8 +69,8 @@ export const PIPELINE_NODES: GraphNodeDef[] = [
     label: "文本 Ingest",
     short: "读档",
     kind: "ingest",
-    x: 292,
-    y: 352,
+    x: 342,
+    y: 452,
     stepIds: ["classifying", "parsing", "extracting"],
   },
   {
@@ -71,16 +78,16 @@ export const PIPELINE_NODES: GraphNodeDef[] = [
     label: "资料池",
     short: "池",
     kind: "pool",
-    x: 436,
-    y: 220,
+    x: 458,
+    y: 318,
   },
   {
     id: "rules",
     label: "CMP 规则",
     short: "规则",
     kind: "stage",
-    x: 580,
-    y: 88,
+    x: 572,
+    y: 172,
     stepIds: ["running_rules"],
   },
   {
@@ -88,8 +95,8 @@ export const PIPELINE_NODES: GraphNodeDef[] = [
     label: "交叉比对",
     short: "比对",
     kind: "stage",
-    x: 580,
-    y: 352,
+    x: 572,
+    y: 452,
     stepIds: ["cross_checking"],
   },
   {
@@ -97,8 +104,8 @@ export const PIPELINE_NODES: GraphNodeDef[] = [
     label: "Finding 研判",
     short: "研判",
     kind: "stage",
-    x: 724,
-    y: 220,
+    x: 700,
+    y: 318,
     stepIds: ["adjudicating"],
   },
   {
@@ -106,8 +113,8 @@ export const PIPELINE_NODES: GraphNodeDef[] = [
     label: "审核校验",
     short: "校验",
     kind: "gate",
-    x: 820,
-    y: 220,
+    x: 812,
+    y: 318,
     stepIds: [],
   },
   {
@@ -115,8 +122,8 @@ export const PIPELINE_NODES: GraphNodeDef[] = [
     label: "交付物",
     short: "交付",
     kind: "stage",
-    x: 916,
-    y: 220,
+    x: 808,
+    y: 452,
     stepIds: ["generating_report", "completed"],
   },
 ];
@@ -153,9 +160,9 @@ export type RuntimeSubNode = {
 const RULES_AGENT_IDS = new Set(["speaker", "policy", "meeting_plan", "invoice", "tax", "ledger"]);
 const CROSS_AGENT_IDS = new Set(["attendance", "evidence", "treasury", "contract"]);
 
-const RULES_SUB_Y = [58, 88, 118];
-const CROSS_SUB_Y = [322, 352, 382];
-const SUB_X = 652;
+const RULES_SUB_Y = [126, 174, 222];
+const CROSS_SUB_Y = [414, 462, 510];
+const SUB_X = 650;
 
 const POST_VISION_STEPS: WorkflowStepId[] = [
   "parsing",
@@ -212,7 +219,7 @@ function buildSubAgentNodes(
       short: (sa.station || agentLabel(sa.id)).slice(0, 2),
       kind: "agent",
       x: SUB_X,
-      y: RULES_SUB_Y[i] ?? 88 + i * 56,
+      y: RULES_SUB_Y[i] ?? 126 + i * 48,
       state: subAgentState("rules", nodeStates),
       branch: "rules",
     });
@@ -228,7 +235,7 @@ function buildSubAgentNodes(
       short: (sa.station || agentLabel(sa.id)).slice(0, 2),
       kind: "agent",
       x: SUB_X,
-      y: CROSS_SUB_Y[i] ?? 352 + i * 56,
+      y: CROSS_SUB_Y[i] ?? 414 + i * 48,
       state: subAgentState("cross", nodeStates),
       branch: "cross",
     });
@@ -301,8 +308,10 @@ export function buildRuntimeGraph(params: {
   subAgents?: SubAgentNode[];
   criticDone?: boolean;
   criticActive?: boolean;
+  traceLogs?: ActivityLog[];
 }) {
-  const { status, jobStep, jobStatus, subAgents = [], criticDone, criticActive } = params;
+  const { status, jobStep, jobStatus, criticDone, criticActive, traceLogs = [] } = params;
+  const subAgents = mergeSubAgentsFromLogs(params.subAgents ?? [], traceLogs);
   const steps = getStepStates(status, jobStep, jobStatus);
   const failed = status === "failed" || jobStatus === "failed";
   const activeStep = steps.find((s) => s.state === "active")?.step.id;
@@ -366,6 +375,36 @@ export function buildRuntimeGraph(params: {
 
   const { subNodes, subEdges } = buildSubAgentNodes(subAgents, nodeStates);
 
+  const pipelineRunning = isPipelineRunning(status, jobStatus);
+  const logSignals = deriveLogGraphSignals(traceLogs, subAgents);
+  const jobBaseline = new Map(nodeStates);
+  for (const sn of subNodes) jobBaseline.set(sn.id, sn.state);
+
+  if (!failed && pipelineRunning && traceLogs.length > 0) {
+    syncGraphWithLogs(nodeStates, subNodes, logSignals, jobBaseline);
+  } else if (!failed && pipelineRunning) {
+    const fallback = primaryNodeFromJobStep(activeStep);
+    if (fallback) {
+      for (const [id, st] of nodeStates) {
+        if (st === "active" && id !== fallback) {
+          nodeStates.set(id, jobBaseline.get(id) === "done" ? "done" : "pending");
+        }
+      }
+      for (const sn of subNodes) {
+        if (sn.state === "active" && sn.id !== fallback) {
+          sn.state = jobBaseline.get(sn.id) === "done" ? "done" : "pending";
+        }
+      }
+      nodeStates.set(fallback, "active");
+      const sub = subNodes.find((s) => s.id === fallback);
+      if (sub) sub.state = "active";
+    }
+  }
+
+  if (!failed && !logSignals.activeNodeId && pipelineRunning) {
+    nodeStates.set("parsedPool", resolveParsedPoolState(nodeStates));
+  }
+
   if (status === "completed" || status === "accepted") {
     for (const sn of subNodes) {
       if (sn.state !== "failed") sn.state = "done";
@@ -381,7 +420,24 @@ export function buildRuntimeGraph(params: {
       )
     : PIPELINE_EDGES;
 
-  return { nodeStates, subNodes, subEdges, pipelineEdges, progress, activeStep, failed };
+  const activeNodeId =
+    logSignals.activeNodeId ??
+    (pipelineRunning ? primaryNodeFromJobStep(activeStep) : null) ??
+    PIPELINE_NODES.map((n) => n.id).find((id) => nodeStates.get(id) === "active") ??
+    subNodes.find((sn) => sn.state === "active")?.id ??
+    null;
+
+  return {
+    nodeStates,
+    subNodes,
+    subEdges,
+    pipelineEdges,
+    progress,
+    activeStep,
+    activeNodeId,
+    logSignals,
+    failed,
+  };
 }
 
 export function buildCombinedNodeStates(

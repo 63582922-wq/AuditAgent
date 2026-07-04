@@ -221,6 +221,26 @@ class AgentRunLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
 
+class AgentActionProposal(Base):
+    __tablename__ = "agent_action_proposals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id"), nullable=True)
+    action_id: Mapped[str] = mapped_column(String(100))
+    label: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text)
+    segment: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    payload_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    result_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
+    )
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class AnalysisJob(Base):
     __tablename__ = "analysis_jobs"
 

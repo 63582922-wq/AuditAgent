@@ -1,9 +1,7 @@
 import type { Messages } from "./zh";
-import type { WorkflowStep } from "@/lib/workflow";
+import type { WorkflowStep, WorkflowStepId } from "@/lib/workflow";
 
-type I18nStepId = keyof Messages["workflow"]["steps"];
-
-const STEP_META: { id: I18nStepId; pct: number; icon: string }[] = [
+const STEP_META: { id: WorkflowStepId; pct: number; icon: string }[] = [
   { id: "created", pct: 0, icon: "◆" },
   { id: "uploaded", pct: 2, icon: "↑" },
   { id: "planning", pct: 5, icon: "◎" },

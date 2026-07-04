@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from sqlalchemy.orm import Session
 
-from app.models import ExtractedEntity, FileRecord, ParsedDocument, Project, RecordLink, Risk
+from app.models import ExtractedEntity, FileRecord, Meeting, Project, RecordLink, Risk
 from app.services.agent.adjudicator import adjudicate_risks
 from app.services.agent.agent_trace import AgentTrace
 from app.services.agent.execution_graph import ExecutionGraph
@@ -24,6 +24,8 @@ from app.services.cross_period_checker import detect_cross_period_risks, detect_
 from app.services.entity_extractor import extract_entities_from_documents
 from app.services.record_linker import build_record_links, links_to_cross_risks
 from app.services.risk_scorer import calculate_risk_score
+from app.services.parsed_document_store import upsert_parsed_document
+from app.services.domain.registry import get_domain_pack
 import uuid
 
 from app.services.rule_engine import run_rules_on_fields, run_rules_on_rows
@@ -84,6 +86,15 @@ class PipelineExecutor:
         if not p:
             raise ValueError("project not found")
         return p
+
+    def _missing_documents_for_present(self, present: Set[str] | set[str]) -> List[dict]:
+        project = self.project
+        pack = get_domain_pack(project)
+        if pack.name == "compliance":
+            meeting = self.db.get(Meeting, self.meeting_id) if self.meeting_id else None
+            meeting_case = dict((meeting.state_json or {}).get("meeting_case") or {}) if meeting else {}
+            return check_missing_documents(set(present), domain="compliance", meeting_case=meeting_case)
+        return check_missing_documents(set(present))
 
     def bootstrap_planning(self) -> None:
         files = scoped_query(self.db, FileRecord, self.project_id, self.meeting_id).all()
@@ -159,6 +170,7 @@ class PipelineExecutor:
                 if is_vision_file(f):
                     continue
                 content = self.wf._parse_file(f)
+                self.wf._log_pdf_vision_slices(self.trace, f, content)
                 headers = []
                 if content.get("sheets"):
                     headers = [c["name"] for c in content["sheets"][0].get("columns", [])]
@@ -169,7 +181,8 @@ class PipelineExecutor:
                     f.document_category = reclassify["document_category"]
                     f.confidence = reclassify["confidence"]
                     f.meta_json = reclassify
-                pd = ParsedDocument(
+                upsert_parsed_document(
+                    self.db,
                     project_id=self.project_id,
                     meeting_id=self.meeting_id,
                     file_id=f.id,
@@ -177,7 +190,6 @@ class PipelineExecutor:
                     content_json=content,
                     text_content=content.get("text_content", ""),
                 )
-                self.db.merge(pd)
                 f.parse_status = "done"
                 self.db.commit()
                 parsed_docs.append(
@@ -349,7 +361,7 @@ class PipelineExecutor:
             parsed_docs = self.state["parsed_docs"]
             all_risks = self.state["all_risks"]
             present = {d["document_category"] for d in parsed_docs}
-            missing = check_missing_documents(present)
+            missing = self._missing_documents_for_present(present)
             self.state["present"] = present
             self.state["missing"] = missing
 
@@ -410,7 +422,7 @@ class PipelineExecutor:
 
         if not missing and self.state.get("parsed_docs"):
             present = {d["document_category"] for d in self.state["parsed_docs"]}
-            missing = check_missing_documents(present)
+            missing = self._missing_documents_for_present(present)
 
         project.summary = self.wf._build_summary(all_risks, missing)
         prior = dict(project.state_json or {})

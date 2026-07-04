@@ -5,12 +5,13 @@ CATEGORY_KEYWORDS = {
     "finding_template": ["finding", "发现点", "roche-finding"],
     "a1_meeting_export": ["a1p", "会议编号", "a1 platform"],
     "meeting_agenda": ["议程", "agenda", "会议日程"],
-    "sign_in_record": ["签到", "签到表", "签到列表"],
-    "observation_confirmation": ["现场确认", "观察记录", "确认书"],
-    "coordination_sms": ["沟通短信", "短信", "spcheck", "远程观察"],
-    "meeting_screenshot": ["线上截图", "screenshot", "会议平台"],
+    "sign_in_record": ["签到", "签到表", "签到列表", "观看数据", "直播观看数据", "参会数据"],
+    "observation_confirmation": ["现场确认", "观察记录", "确认书", "确认单", "观察确认"],
+    "coordination_sms": ["沟通短信", "短信", "spcheck", "远程观察", "报备邮件", "日程更新报备", "邮件"],
+    "meeting_screenshot": ["线上截图", "screenshot", "会议平台", "zoom端", "直播端", "最大端口"],
     "presentation_material": ["ppt", "演讲", "文稿"],
     "speaker_profile": ["讲者", "网络资料", "医生主页"],
+    "other_supporting_evidence": ["其他厂家", "赞助回报", "厂家", "赞助", "回报"],
 }
 
 REQUIRED_EVIDENCE = [
@@ -26,7 +27,12 @@ REQUIRED_EVIDENCE = [
 ]
 
 DOMAIN_LABEL = "会议合规远程观察"
+PRIMARY_DELIVERABLE_TYPES = (
+    "fixed_template_excel",
+    "deliverable_package",
+)
 DELIVERABLE_TYPES = [
+    "fixed_template_excel",
     "finding_excel",
     "finding_pdf",
     "observation_summary",
@@ -47,5 +53,6 @@ DOCUMENT_CATEGORY_LABELS = {
     "meeting_screenshot": "线上截图",
     "presentation_material": "演讲材料",
     "speaker_profile": "讲者资料",
+    "other_supporting_evidence": "其他支持证据",
     "unknown": "未识别",
 }

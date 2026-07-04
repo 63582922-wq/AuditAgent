@@ -18,6 +18,8 @@ export function ProjectHubPageClient() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadErrorRaw, setLoadErrorRaw] = useState("");
+  const [formMsg, setFormMsg] = useState("");
+  const [formMsgKind, setFormMsgKind] = useState<"danger" | "success">("danger");
   const loadError = loadErrorRaw ? formatApiError(loadErrorRaw, t) : "";
 
   useEffect(() => {
@@ -31,18 +33,32 @@ export function ProjectHubPageClient() {
   }, [id]);
 
   async function saveName() {
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      setFormMsgKind("danger");
+      setFormMsg(t("projects.nameRequired"));
+      return;
+    }
     setBusy(true);
     setLoadErrorRaw("");
+    setFormMsg("");
     try {
       const p = await updateProject(id, { name: name.trim() });
       setProject(p);
       setEditing(false);
+      setFormMsgKind("success");
+      setFormMsg(t("projects.saved"));
     } catch (e) {
-      setLoadErrorRaw(e instanceof Error ? e.message : String(e));
+      setFormMsgKind("danger");
+      setFormMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
+  }
+
+  function cancelEdit() {
+    setName(project?.name || "");
+    setEditing(false);
+    setFormMsg("");
   }
 
   const notFound = !!loadError && !project;
@@ -60,6 +76,7 @@ export function ProjectHubPageClient() {
       />
 
       {loadError && <p className="alert danger">{loadError}</p>}
+      {formMsg && <p className={`alert ${formMsgKind}`}>{formMsg}</p>}
 
       {notFound ? null : (
       <Block title={t("projectHub.info")}>
@@ -69,7 +86,7 @@ export function ProjectHubPageClient() {
             <ActionButton onClick={saveName} disabled={busy}>
               {t("common.save")}
             </ActionButton>
-            <button type="button" className="btn-outline" onClick={() => setEditing(false)}>
+            <button type="button" className="btn-outline" onClick={cancelEdit} disabled={busy}>
               {t("common.cancel")}
             </button>
           </div>

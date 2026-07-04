@@ -18,7 +18,17 @@ MIN_PAGE_TEXT_CHARS = 80
 MIN_EMBED_PIXELS = 10_000
 MIN_EMBED_AREA_RATIO = 0.05
 VISION_PAGE_DPI = 200
-MAX_VISION_PAGES = 20
+DEFAULT_MAX_VISION_PAGES = 120
+COMPLIANCE_PAGE_REVIEW_CATEGORIES = {
+    "a1_meeting_export",
+    "sign_in_record",
+    "observation_confirmation",
+    "meeting_screenshot",
+    "meeting_agenda",
+    "presentation_material",
+    "speaker_profile",
+    "other_supporting_evidence",
+}
 
 
 @dataclass
@@ -141,6 +151,10 @@ def _classify_page(page: fitz.Page, doc: fitz.Document, page_number: int) -> Tup
     return "text_only", work
 
 
+def _requires_compliance_page_review(document_category: str, domain: str) -> bool:
+    return domain == "compliance" and document_category in COMPLIANCE_PAGE_REVIEW_CATEGORIES
+
+
 def _extract_text_pages(file_path: Path) -> Tuple[List[Dict[str, Any]], str, List[Dict[str, Any]]]:
     text_chunks: List[str] = []
     pages_out: List[Dict[str, Any]] = []
@@ -242,10 +256,21 @@ def ingest_pdf_hybrid(
     page_modes: List[str] = []
 
     with fitz.open(file_path) as doc:
-        page_limit = min(len(doc), MAX_VISION_PAGES)
+        configured_limit = getattr(settings, "pdf_vision_max_pages", DEFAULT_MAX_VISION_PAGES)
+        page_limit = len(doc) if configured_limit <= 0 else min(len(doc), configured_limit)
         for i in range(page_limit):
             page = doc[i]
             mode, work = _classify_page(page, doc, i + 1)
+            if analyze_vision and _requires_compliance_page_review(document_category, domain) and mode == "text_only":
+                work = [
+                    VisionSliceWork(
+                        page_number=i + 1,
+                        ingest_mode="vision_page_review",
+                        slice_id=f"p{i + 1}-page-review",
+                        image=_render_page(page),
+                    )
+                ]
+                mode = "hybrid_page_review"
             page_modes.append(mode)
             vision_work.extend(work)
 

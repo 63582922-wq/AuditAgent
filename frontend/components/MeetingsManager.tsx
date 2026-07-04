@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActionButton } from "@/components/ActionButton";
 import { Block } from "@/components/PageChrome";
 import { FolderPicker } from "@/components/FolderPicker";
@@ -23,6 +23,8 @@ type Props = {
   projectId: string;
 };
 
+const MEETINGS_PAGE_SIZE = 50;
+
 type EditState = {
   id: string;
   meeting_code: string;
@@ -39,11 +41,14 @@ export function MeetingsManager({ projectId }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [msgKind, setMsgKind] = useState<"danger" | "success">("danger");
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importFiles, setImportFiles] = useState<File[]>([]);
   const [importTitle, setImportTitle] = useState("");
   const [edit, setEdit] = useState<EditState | null>(null);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [form, setForm] = useState({
     meeting_code: "",
     meeting_title: "",
@@ -55,13 +60,18 @@ export function MeetingsManager({ projectId }: Props) {
   const load = useCallback(() => {
     setLoading(true);
     fetchMeetings(projectId)
-      .then(setMeetings)
+      .then((nextMeetings) => {
+        setMeetings(nextMeetings);
+        const validIds = new Set(nextMeetings.map((m) => m.id));
+        setSelected((prev) => new Set(Array.from(prev).filter((id) => validIds.has(id))));
+      })
       .catch((e) => {
         const err = e as Error & { code?: string | null };
+        setMsgKind("danger");
         setMsg(formatApiError(err.message || String(e), t, err.code));
       })
       .finally(() => setLoading(false));
-  }, [projectId]);
+  }, [projectId, t]);
 
   useEffect(() => {
     load();
@@ -71,11 +81,45 @@ export function MeetingsManager({ projectId }: Props) {
     setForm((f) => ({ ...f, observation_type: t("meetings.defaultType") }));
   }, [t]);
 
-  const allSelected = meetings.length > 0 && selected.size === meetings.length;
+  const filteredMeetings = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return meetings;
+    return meetings.filter((m) =>
+      [
+        m.meeting_code,
+        m.meeting_title || "",
+        m.observation_type || "",
+        m.status,
+        m.summary || "",
+      ].some((value) => value.toLowerCase().includes(q))
+    );
+  }, [meetings, query]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredMeetings.length / MEETINGS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleMeetings = useMemo(() => {
+    const start = (currentPage - 1) * MEETINGS_PAGE_SIZE;
+    return filteredMeetings.slice(start, start + MEETINGS_PAGE_SIZE);
+  }, [currentPage, filteredMeetings]);
+  const visibleMeetingIds = useMemo(() => visibleMeetings.map((m) => m.id), [visibleMeetings]);
+  const selectedVisibleCount = visibleMeetingIds.filter((id) => selected.has(id)).length;
+  const allSelected = visibleMeetingIds.length > 0 && selectedVisibleCount === visibleMeetingIds.length;
+
+  useEffect(() => {
+    setPage(1);
+  }, [query]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   function toggleAll() {
-    if (allSelected) setSelected(new Set());
-    else setSelected(new Set(meetings.map((m) => m.id)));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) visibleMeetingIds.forEach((id) => next.delete(id));
+      else visibleMeetingIds.forEach((id) => next.add(id));
+      return next;
+    });
   }
 
   function toggleOne(id: string) {
@@ -89,6 +133,7 @@ export function MeetingsManager({ projectId }: Props) {
 
   async function onCreate() {
     if (!form.meeting_code.trim()) {
+      setMsgKind("danger");
       setMsg(t("meetings.codeRequired"));
       return;
     }
@@ -106,6 +151,7 @@ export function MeetingsManager({ projectId }: Props) {
       });
       load();
     } catch (e) {
+      setMsgKind("danger");
       setMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -114,6 +160,7 @@ export function MeetingsManager({ projectId }: Props) {
 
   async function onImportFolder() {
     if (!importFiles.length) {
+      setMsgKind("danger");
       setMsg(t("meetings.importPickFolder"));
       return;
     }
@@ -133,6 +180,7 @@ export function MeetingsManager({ projectId }: Props) {
       }
       load();
     } catch (e) {
+      setMsgKind("danger");
       setMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -141,16 +189,25 @@ export function MeetingsManager({ projectId }: Props) {
 
   async function onSaveEdit() {
     if (!edit) return;
+    if (!edit.meeting_code.trim()) {
+      setMsgKind("danger");
+      setMsg(t("meetings.codeRequired"));
+      return;
+    }
     setBusy(true);
+    setMsg("");
     try {
       await updateMeeting(projectId, edit.id, {
-        meeting_code: edit.meeting_code,
-        meeting_title: edit.meeting_title || undefined,
-        observation_type: edit.observation_type || undefined,
+        meeting_code: edit.meeting_code.trim(),
+        meeting_title: edit.meeting_title.trim() || undefined,
+        observation_type: edit.observation_type.trim() || undefined,
       });
       setEdit(null);
+      setMsgKind("success");
+      setMsg(t("meetings.saved"));
       load();
     } catch (e) {
+      setMsgKind("danger");
       setMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -160,6 +217,7 @@ export function MeetingsManager({ projectId }: Props) {
   async function onDeleteOne(id: string, code: string) {
     if (!confirm(t("meetings.confirmDeleteOne", { code }))) return;
     setBusy(true);
+    setMsg("");
     try {
       await deleteMeeting(projectId, id);
       setSelected((s) => {
@@ -167,8 +225,11 @@ export function MeetingsManager({ projectId }: Props) {
         n.delete(id);
         return n;
       });
+      setMsgKind("success");
+      setMsg(t("meetings.deletedOne", { code }));
       load();
     } catch (e) {
+      setMsgKind("danger");
       setMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -179,11 +240,15 @@ export function MeetingsManager({ projectId }: Props) {
     if (!selected.size) return;
     if (!confirm(t("meetings.confirmBatch", { count: selected.size }))) return;
     setBusy(true);
+    setMsg("");
     try {
-      await batchDeleteMeetings(projectId, Array.from(selected));
+      const result = await batchDeleteMeetings(projectId, Array.from(selected));
       setSelected(new Set());
+      setMsgKind("success");
+      setMsg(t("meetings.deletedSelected", { count: result.deleted }));
       load();
     } catch (e) {
+      setMsgKind("danger");
       setMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -192,17 +257,34 @@ export function MeetingsManager({ projectId }: Props) {
 
   return (
     <Block title={t("meetings.title")} hint={t("meetings.hint")}>
-      {msg && <p className="alert danger">{msg}</p>}
+      {msg && <p className={`alert ${msgKind}`}>{msg}</p>}
 
       <div className="table-toolbar">
-        <label className="check-row">
-          <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!meetings.length} />
-          {t("rail.selectAll")}
-        </label>
+        <div className="table-toolbar__controls">
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleAll}
+              disabled={!visibleMeetings.length || loading || busy}
+            />
+            {t("meetings.selectVisible")}
+          </label>
+          <input
+            className="input input-sm table-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("meetings.searchPlaceholder")}
+            disabled={loading || busy}
+          />
+          <span className="muted table-count">
+            {t("meetings.pageStatus", { page: currentPage, total: totalPages, count: filteredMeetings.length })}
+          </span>
+        </div>
         <div className="table-toolbar__actions">
           {selected.size > 0 && (
             <button type="button" className="btn-text btn-text--danger" onClick={onBatchDelete} disabled={busy}>
-              {t("projects.deleteSelected")} ({selected.size})
+              {busy ? t("meetings.deleteSelectedBusy") : t("projects.deleteSelected")} ({selected.size})
             </button>
           )}
           <ActionButton variant="outline" onClick={() => setShowImport((v) => !v)} disabled={busy}>
@@ -211,6 +293,24 @@ export function MeetingsManager({ projectId }: Props) {
           <ActionButton variant="outline" onClick={() => setShowCreate((v) => !v)} disabled={busy}>
             {showCreate ? t("common.cancel") : t("meetings.new")}
           </ActionButton>
+        </div>
+        <div className="table-pager">
+          <button
+            type="button"
+            className="btn-text"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={loading || currentPage <= 1}
+          >
+            {t("meetings.prevPage")}
+          </button>
+          <button
+            type="button"
+            className="btn-text"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={loading || currentPage >= totalPages}
+          >
+            {t("meetings.nextPage")}
+          </button>
         </div>
       </div>
 
@@ -241,18 +341,21 @@ export function MeetingsManager({ projectId }: Props) {
             placeholder={t("meetings.codePlaceholder")}
             value={form.meeting_code}
             onChange={(e) => setForm({ ...form, meeting_code: e.target.value })}
+            disabled={busy}
           />
           <input
             className="input"
             placeholder={t("meetings.titleField")}
             value={form.meeting_title}
             onChange={(e) => setForm({ ...form, meeting_title: e.target.value })}
+            disabled={busy}
           />
           <input
             className="input"
             placeholder={t("meetings.observationType")}
             value={form.observation_type}
             onChange={(e) => setForm({ ...form, observation_type: e.target.value })}
+            disabled={busy}
           />
           <ActionButton loadingLabel={t("meetings.creating")} onClick={onCreate} disabled={busy}>
             {t("common.create")}
@@ -282,10 +385,10 @@ export function MeetingsManager({ projectId }: Props) {
             </tr>
           )}
           {!loading &&
-            meetings.map((m) => (
+            visibleMeetings.map((m) => (
               <tr key={m.id}>
                 <td>
-                  <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggleOne(m.id)} />
+                  <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggleOne(m.id)} disabled={busy} />
                 </td>
                 <td className="mono strong">
                   {edit?.id === m.id ? (
@@ -293,6 +396,7 @@ export function MeetingsManager({ projectId }: Props) {
                       className="input input-sm"
                       value={edit.meeting_code}
                       onChange={(e) => setEdit({ ...edit, meeting_code: e.target.value })}
+                      disabled={busy}
                     />
                   ) : (
                     <Link href={`/projects/${projectId}/meetings/${m.id}`}>{m.meeting_code}</Link>
@@ -304,6 +408,7 @@ export function MeetingsManager({ projectId }: Props) {
                       className="input input-sm"
                       value={edit.meeting_title}
                       onChange={(e) => setEdit({ ...edit, meeting_title: e.target.value })}
+                      disabled={busy}
                     />
                   ) : (
                     <Link
@@ -324,9 +429,9 @@ export function MeetingsManager({ projectId }: Props) {
                   {edit?.id === m.id ? (
                     <>
                       <button type="button" className="btn-text" onClick={onSaveEdit} disabled={busy}>
-                        {t("common.save")}
+                        {busy ? t("common.processing") : t("common.save")}
                       </button>
-                      <button type="button" className="btn-text" onClick={() => setEdit(null)}>
+                      <button type="button" className="btn-text" onClick={() => setEdit(null)} disabled={busy}>
                         {t("common.cancel")}
                       </button>
                     </>
@@ -346,11 +451,17 @@ export function MeetingsManager({ projectId }: Props) {
                             observation_type: m.observation_type || "",
                           })
                         }
+                        disabled={busy}
                       >
                         {t("common.edit")}
                       </button>
-                      <button type="button" className="btn-text btn-text--danger" onClick={() => onDeleteOne(m.id, m.meeting_code)}>
-                        {t("common.delete")}
+                      <button
+                        type="button"
+                        className="btn-text btn-text--danger"
+                        onClick={() => onDeleteOne(m.id, m.meeting_code)}
+                        disabled={busy}
+                      >
+                        {busy ? t("common.processing") : t("common.delete")}
                       </button>
                     </>
                   )}
@@ -362,6 +473,13 @@ export function MeetingsManager({ projectId }: Props) {
             <tr>
               <td colSpan={8} className="empty">
                 {t("meetings.empty")}
+              </td>
+            </tr>
+          )}
+          {!loading && meetings.length > 0 && filteredMeetings.length === 0 && (
+            <tr>
+              <td colSpan={8} className="empty">
+                {t("meetings.noMatches")}
               </td>
             </tr>
           )}

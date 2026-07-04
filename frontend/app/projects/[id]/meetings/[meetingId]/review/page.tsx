@@ -15,6 +15,7 @@ export default function MeetingReviewPage() {
   const [risks, setRisks] = useState<Risk[]>([]);
   const [comment, setComment] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState("");
+  const [msgKind, setMsgKind] = useState<"danger" | "success">("success");
   const [busy, setBusy] = useState("");
 
   function load() {
@@ -26,39 +27,55 @@ export default function MeetingReviewPage() {
   }, [id, meetingId]);
 
   async function submitReview(riskId: string, status: string) {
+    const key = `review:${riskId}`;
+    setBusy(key);
+    setMsg("");
     try {
       await api(`/projects/${id}/risks/${riskId}/review`, {
         method: "POST",
         body: JSON.stringify({ review_status: status, review_comment: comment[riskId] || "" }),
       });
+      setMsgKind("success");
       setMsg(t("reviewPage.saved"));
       await Promise.all([refreshLive(), api<Risk[]>(`/projects/${id}/meetings/${meetingId}/risks`).then(setRisks)]);
     } catch (e) {
+      setMsgKind("danger");
       setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
     }
   }
 
   async function regenerateReports() {
+    setBusy("regenerate");
+    setMsg("");
     try {
       await api(`/projects/${id}/meetings/${meetingId}/regenerate-outputs`, { method: "POST" });
+      setMsgKind("success");
       setMsg(t("reviewPage.regenOk"));
-      refreshLive();
+      await refreshLive();
     } catch (e) {
-      setMsg(String(e));
+      setMsgKind("danger");
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
     }
   }
 
   async function reanalyze(scope: "adjudicating" | "cross_checking") {
     setBusy(scope);
+    setMsg("");
     try {
       await api(`/projects/${id}/meetings/${meetingId}/reanalyze`, {
         method: "POST",
         body: JSON.stringify({ scope }),
       });
+      setMsgKind("success");
       setMsg(scope === "adjudicating" ? t("reviewPage.startedAdj") : t("reviewPage.startedCross"));
-      refreshLive();
+      await refreshLive();
     } catch (e) {
-      setMsg(String(e));
+      setMsgKind("danger");
+      setMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy("");
     }
@@ -94,7 +111,13 @@ export default function MeetingReviewPage() {
             >
               {t("reviewPage.rerunCross")}
             </ActionButton>
-            <ActionButton variant="outline" onClick={regenerateReports}>
+            <ActionButton
+              variant="outline"
+              loadingLabel={t("reviewPage.starting")}
+              loading={busy === "regenerate"}
+              disabled={!!busy}
+              onClick={regenerateReports}
+            >
               {t("reviewPage.regenReports")}
             </ActionButton>
           </div>
@@ -107,7 +130,7 @@ export default function MeetingReviewPage() {
         </div>
       )}
 
-      {msg && <div className="alert success">{msg}</div>}
+      {msg && <div className={`alert ${msgKind}`}>{msg}</div>}
 
       {items.map((r) => (
         <Block
@@ -133,15 +156,16 @@ export default function MeetingReviewPage() {
             placeholder={t("reviewPage.commentPlaceholder")}
             value={comment[r.id] || ""}
             onChange={(e) => setComment({ ...comment, [r.id]: e.target.value })}
+            disabled={!!busy}
           />
           <div style={{ marginTop: "0.75rem", display: "flex", gap: "1rem" }}>
-            <button type="button" className="btn-text" onClick={() => submitReview(r.id, "confirmed")}>
+            <button type="button" className="btn-text" onClick={() => submitReview(r.id, "confirmed")} disabled={!!busy}>
               {t("reviewPage.confirm")}
             </button>
-            <button type="button" className="btn-text" onClick={() => submitReview(r.id, "dismissed")}>
+            <button type="button" className="btn-text" onClick={() => submitReview(r.id, "dismissed")} disabled={!!busy}>
               {t("reviewPage.dismiss")}
             </button>
-            <button type="button" className="btn-text" onClick={() => submitReview(r.id, "needs_more_info")}>
+            <button type="button" className="btn-text" onClick={() => submitReview(r.id, "needs_more_info")} disabled={!!busy}>
               {t("reviewPage.needMore")}
             </button>
           </div>

@@ -9,6 +9,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from app.services.domain.compliance.constants import DOCUMENT_CATEGORY_LABELS
+from app.services.domain.compliance.template_field_engine import merge_vision_consensus_fallbacks
 
 _HEADER_FILL = PatternFill("solid", fgColor="1E3A5F")
 _HEADER_FONT = Font(color="FFFFFF", bold=True)
@@ -76,6 +77,13 @@ def material_from_parsed_doc(file_record: Any, parsed_doc: Any) -> dict[str, Any
     cj = parsed_doc.content_json or {}
     md, layout = extract_material_layout(cj)
     fields = cj.get("fields") if isinstance(cj.get("fields"), dict) else {}
+    field_confidence = cj.get("field_confidence") or cj.get("confidence") or {}
+    if not isinstance(field_confidence, dict):
+        field_confidence = {}
+    fields, field_confidence = merge_vision_consensus_fallbacks(cj, fields, field_confidence)
+    vision_quality = cj.get("vision_quality") if isinstance(cj.get("vision_quality"), dict) else {}
+    recognition_plan = cj.get("recognition_plan") if isinstance(cj.get("recognition_plan"), dict) else {}
+    vision_consensus = cj.get("vision_consensus") if isinstance(cj.get("vision_consensus"), dict) else {}
     text = (parsed_doc.text_content or cj.get("text_content") or md or "").strip()
     counts = layout_element_counts(layout)
     return {
@@ -88,7 +96,16 @@ def material_from_parsed_doc(file_record: Any, parsed_doc: Any) -> dict[str, Any
         "layout_details": layout,
         "layout_counts": counts,
         "fields": fields,
+        "sheets": cj.get("sheets") or [],
         "vision_confidence": fields.get("vision_confidence"),
+        "vision_quality_score": vision_quality.get("score"),
+        "vision_manual_review_required": bool(
+            cj.get("manual_review_required") or fields.get("vision_manual_review_required")
+        ),
+        "vision_review_reasons": cj.get("review_reasons") or fields.get("vision_review_reasons") or [],
+        "vision_consensus": vision_consensus,
+        "field_confidence": field_confidence,
+        "recognition_plan": recognition_plan,
         "char_count": len(text),
     }
 
@@ -122,6 +139,40 @@ def _layout_summary(counts: dict[str, int]) -> str:
     return " / ".join(parts) if parts else "—"
 
 
+def _format_list(value: Any) -> str:
+    if not value:
+        return "—"
+    if isinstance(value, list):
+        return "；".join(str(item) for item in value if item not in (None, ""))
+    return str(value)
+
+
+def _format_field_confidence(value: Any) -> str:
+    if not isinstance(value, dict) or not value:
+        return "—"
+    parts = []
+    for key in sorted(value):
+        val = value.get(key)
+        if val in (None, ""):
+            continue
+        parts.append(f"{key}: {val}")
+    return "；".join(parts) if parts else "—"
+
+
+def _format_consensus_conflicts(value: Any) -> str:
+    if not isinstance(value, list) or not value:
+        return "—"
+    parts = []
+    for item in value[:6]:
+        if not isinstance(item, dict):
+            continue
+        field = item.get("field") or "unknown"
+        values = item.get("values") if isinstance(item.get("values"), list) else []
+        value_text = "/".join(str(v.get("value") if isinstance(v, dict) else v) for v in values[:4])
+        parts.append(f"{field}: {value_text}" if value_text else str(field))
+    return "；".join(parts) if parts else "—"
+
+
 def generate_material_parse_index_excel(materials: list[dict], output: Path) -> None:
     wb = Workbook()
     ws = wb.active
@@ -133,6 +184,13 @@ def generate_material_parse_index_excel(materials: list[dict], output: Path) -> 
             "资料类型",
             "OCR 引擎",
             "视觉置信度",
+            "视觉质量分",
+            "需识别复核",
+            "复核原因",
+            "共识状态",
+            "共识冲突",
+            "识别策略",
+            "字段置信度",
             "版面结构",
             "识别字符数",
             "Markdown 文件",
@@ -148,6 +206,10 @@ def generate_material_parse_index_excel(materials: list[dict], output: Path) -> 
         layout_rel = m.get("layout_rel_path") or ""
         preview = (m.get("text_content") or m.get("md_results") or "")[:240].replace("\n", " ")
         conf = m.get("vision_confidence")
+        quality_score = m.get("vision_quality_score")
+        manual_review = m.get("vision_manual_review_required")
+        consensus = m.get("vision_consensus") if isinstance(m.get("vision_consensus"), dict) else {}
+        plan = m.get("recognition_plan") if isinstance(m.get("recognition_plan"), dict) else {}
         ws.append(
             [
                 i,
@@ -155,6 +217,13 @@ def generate_material_parse_index_excel(materials: list[dict], output: Path) -> 
                 _category_label(str(m.get("document_category") or "")),
                 m.get("ocr_engine") or "—",
                 conf if conf is not None else "—",
+                quality_score if quality_score is not None else "—",
+                "是" if manual_review else "否",
+                _format_list(m.get("vision_review_reasons")),
+                consensus.get("status") or "—",
+                _format_consensus_conflicts(consensus.get("conflicts")),
+                plan.get("strategy") or "—",
+                _format_field_confidence(m.get("field_confidence")),
                 _layout_summary(counts),
                 m.get("char_count") or 0,
                 md_rel or "—",
@@ -164,7 +233,7 @@ def generate_material_parse_index_excel(materials: list[dict], output: Path) -> 
         )
 
     if not materials:
-        ws.append(["—", "—", "—", "—", "—", "—", 0, "—", "—", "暂无解析结果"])
+        ws.append(["—", "—", "—", "—", "—", "—", "否", "—", "—", "—", "—", "—", "—", 0, "—", "—", "暂无解析结果"])
 
     ws.auto_filter.ref = ws.dimensions
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
@@ -187,6 +256,12 @@ def write_material_markdown_files(materials: list[dict], md_dir: Path) -> None:
             f"# {m.get('file_name')}\n\n"
             f"- 资料类型：{cat}\n"
             f"- OCR 引擎：{m.get('ocr_engine') or '—'}\n"
+            f"- 视觉质量分：{m.get('vision_quality_score') if m.get('vision_quality_score') is not None else '—'}\n"
+            f"- 需识别复核：{'是' if m.get('vision_manual_review_required') else '否'}\n"
+            f"- 复核原因：{_format_list(m.get('vision_review_reasons'))}\n"
+            f"- 共识状态：{(m.get('vision_consensus') or {}).get('status') if isinstance(m.get('vision_consensus'), dict) else '—'}\n"
+            f"- 共识冲突：{_format_consensus_conflicts((m.get('vision_consensus') or {}).get('conflicts') if isinstance(m.get('vision_consensus'), dict) else [])}\n"
+            f"- 字段置信度：{_format_field_confidence(m.get('field_confidence'))}\n"
             f"- 版面结构：{_layout_summary(m.get('layout_counts') or {})}\n\n"
             "---\n\n"
         )
@@ -208,6 +283,12 @@ def write_material_layout_json_files(materials: list[dict], layout_dir: Path) ->
             "file_name": m.get("file_name"),
             "document_category": m.get("document_category"),
             "ocr_engine": m.get("ocr_engine"),
+            "vision_quality_score": m.get("vision_quality_score"),
+            "vision_manual_review_required": m.get("vision_manual_review_required"),
+            "vision_review_reasons": m.get("vision_review_reasons"),
+            "vision_consensus": m.get("vision_consensus"),
+            "field_confidence": m.get("field_confidence"),
+            "recognition_plan": m.get("recognition_plan"),
             "layout_counts": m.get("layout_counts"),
             "layout_details": layout,
         }
