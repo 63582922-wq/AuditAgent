@@ -181,7 +181,8 @@ export default function MeetingOutputsPage() {
     deliverable?.template_gate?.blocked || qualityStatus !== "pass" ? t("outputsPage.deliveryBlockTemplate") : "",
     !primaryDeliverable || !archiveOutput ? t("outputsPage.deliveryBlockOutputs") : "",
   ].filter(Boolean);
-  const formalDeliveryBlocked = formalDeliveryBlocks.length > 0;
+  const formalAcceptanceGate = deliverable?.formal_acceptance_gate;
+  const formalDeliveryBlocked = formalAcceptanceGate?.blocked ?? formalDeliveryBlocks.length > 0;
   const canReview =
     outputs.length > 0 &&
     ["completed", "needs_review", "deliverable_rejected"].includes(project?.status ?? "") &&
@@ -255,7 +256,7 @@ export default function MeetingOutputsPage() {
       )}
       {formalDeliveryBlocked && deliverable?.status !== "accepted" && (
         <Block className="settling-banner settling-banner--warn" title={t("outputsPage.deliveryBlockedTitle")} hint={t("outputsPage.deliveryBlockedHint")}>
-          <p style={{ margin: 0 }}>{deliverable?.comment || formalDeliveryBlocks.join("；")}</p>
+          <p style={{ margin: 0 }}>{formalAcceptanceGate?.message || deliverable?.comment || formalDeliveryBlocks.join("；")}</p>
           <p className="muted" style={{ margin: "0.55rem 0 0" }}>{t("outputsPage.deliveryBlockedAction")}</p>
         </Block>
       )}

@@ -170,3 +170,43 @@ def test_delivery_acceptance_api_blocks_preview_with_unresolved_template_fields(
     assert response.json()["error"]["code"] == "DELIVERY_GATE_BLOCKED"
     db.refresh(meeting)
     assert meeting.status == "needs_review"
+
+
+def test_meeting_live_exposes_the_same_formal_delivery_gate(client, db):
+    project = Project(name="交付门禁状态测试", status="active")
+    db.add(project)
+    db.commit()
+    meeting = create_meeting(db, project.id, meeting_code="GATE-LIVE-001")
+    meeting.status = "completed"
+    meeting.deliverable_json = {
+        "status": "pending",
+        "template_quality": {"status": "pass"},
+        "evidence_gate": {"blocked": False},
+        "evaluation_gate": {"blocked": False},
+    }
+    db.add_all(
+        [
+            Output(
+                project_id=project.id,
+                meeting_id=meeting.id,
+                output_type="fixed_template_excel",
+                file_name="固定模板输出.xlsx",
+                storage_path="/tmp/gate-live-template.xlsx",
+            ),
+            Output(
+                project_id=project.id,
+                meeting_id=meeting.id,
+                output_type="deliverable_package",
+                file_name="GATE-LIVE-001.zip",
+                storage_path="/tmp/gate-live.zip",
+            ),
+        ]
+    )
+    db.commit()
+
+    response = client.get(f"/api/projects/{project.id}/meetings/{meeting.id}/live")
+
+    assert response.status_code == 200
+    gate = response.json()["state_json"]["deliverable"]["formal_acceptance_gate"]
+    assert gate["blocked"] is False
+    assert gate["reason"] == "formal_delivery_ready"

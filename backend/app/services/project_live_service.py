@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.models import AgentRunLog, AnalysisJob, FileRecord, Project, Risk
 from app.services.agent.case_run import latest_case_run
 from app.schemas import ProjectLiveOut
-from app.services.meeting_service import get_meeting
+from app.services.meeting_service import delivery_acceptance_gate, get_meeting
 from app.services.output_scope import primary_output_count
 
 
@@ -154,6 +154,8 @@ def build_meeting_live(db: Session, project_id: str, meeting_id: str) -> Project
             "run_kind": run.run_kind,
             "created_at": run.created_at.isoformat() + "Z" if run.created_at else None,
         }
+    deliverable_json = dict(meeting.deliverable_json or {})
+    deliverable_json["formal_acceptance_gate"] = delivery_acceptance_gate(db, meeting)
     return ProjectLiveOut(
         id=project.id,
         name=f"{project.name} · {meeting.meeting_code}",
@@ -161,7 +163,7 @@ def build_meeting_live(db: Session, project_id: str, meeting_id: str) -> Project
         summary=meeting.summary or project.summary,
         created_at=meeting.created_at,
         updated_at=meeting.updated_at,
-        state_json=compact_live_state(state_json, meeting.deliverable_json),
+        state_json=compact_live_state(state_json, deliverable_json),
         file_count=db.query(FileRecord).filter_by(meeting_id=meeting_id).count(),
         risk_count=db.query(Risk).filter_by(meeting_id=meeting_id).count(),
         output_count=primary_output_count(db, meeting_id=meeting_id),

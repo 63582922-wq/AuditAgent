@@ -209,6 +209,12 @@ export type ProjectStateJson = {
       status?: "pass" | "needs_review" | "fail";
       issue_field_count?: number;
     };
+    formal_acceptance_gate?: {
+      blocked?: boolean;
+      reason?: string;
+      message?: string;
+      blocks?: { code?: string; detail?: Record<string, unknown> }[];
+    };
     template_quality?: {
       status?: "pass" | "needs_review" | "fail";
       total_fields?: number;
