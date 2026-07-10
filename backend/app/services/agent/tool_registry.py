@@ -7,6 +7,8 @@ from typing import Any, Callable, Dict, List
 from sqlalchemy.orm import Session
 
 from app.models import FileRecord
+from app.services.cross_checker import check_missing_documents
+from app.services.domain.compliance.case_loader import bootstrap_meeting_profile
 from app.services.domain.registry import get_domain_pack
 from app.services.memory_rag import format_memories_for_prompt, retrieve_memories
 from app.services.parsers.excel_parser import parse_excel
@@ -26,7 +28,7 @@ def tool_schemas() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "get_required_documents",
-                "description": "获取完整风险评估所需的资料清单及重要性",
+                "description": "获取当前案件口径下的资料要求、缺件清单及重要性",
                 "parameters": {"type": "object", "properties": {}, "required": []},
             },
         },
@@ -135,9 +137,26 @@ def build_tool_handlers(
     def list_uploaded_files() -> List[Dict[str, Any]]:
         return files_summary
 
-    def get_required_documents() -> List[Dict[str, str]]:
+    def get_required_documents() -> Any:
         pack = get_domain_pack()
-        return [{"document_type": d[0], "importance": d[1], "reason": d[2]} for d in pack.required_docs]
+        required = [{"document_type": d[0], "importance": d[1], "reason": d[2]} for d in pack.required_docs]
+        if pack.name != "compliance" or not records:
+            return required
+        project_id = records[0].project_id
+        meeting_id = next((r.meeting_id for r in records if r.meeting_id), None)
+        meeting_case = bootstrap_meeting_profile(db, project_id, meeting_id)
+        categories = {r.document_category for r in records}
+        missing = check_missing_documents(categories, domain="compliance", meeting_case=meeting_case)
+        code = str(meeting_case.get("meeting_code") or "").upper()
+        scope_notes = []
+        if code.startswith("SMS"):
+            scope_notes.append("SMS远程观察不要求A1导出，以直播观看数据、确认单、ZOOM/直播截图与沟通记录构建替代证据链。")
+        return {
+            "required_documents": required,
+            "currently_missing": missing,
+            "meeting_case": meeting_case,
+            "scope_notes": scope_notes,
+        }
 
     def search_memory(query: str, risk_category: str = "") -> str:
         mems = retrieve_memories(

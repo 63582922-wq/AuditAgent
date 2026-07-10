@@ -1,10 +1,19 @@
 """Tests for agent memory write decisions."""
 
-from app.models import Risk
+from app.models import Project, Risk
 from app.services.agent.memory_writer import decide_and_persist_memories
 
 
-def test_decide_and_persist_skips_low_confidence(db, sample_project):
+def _sample_project(db) -> Project:
+    project = Project(name="Memory writer test", status="completed")
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+def test_decide_and_persist_skips_low_confidence(db):
+    sample_project = _sample_project(db)
     db.add(
         Risk(
             project_id=sample_project.id,
@@ -26,7 +35,8 @@ def test_decide_and_persist_skips_low_confidence(db, sample_project):
     assert summary.written == 0
 
 
-def test_decide_and_persist_writes_high_confidence(db, sample_project):
+def test_decide_and_persist_writes_high_confidence(db):
+    sample_project = _sample_project(db)
     db.add(
         Risk(
             project_id=sample_project.id,

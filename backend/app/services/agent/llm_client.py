@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +40,70 @@ def require_agent_llm() -> None:
 
 def _is_retryable_status(status_code: int) -> bool:
     return status_code >= 500 or status_code in (408, 429)
+
+
+_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)(?:```|$)", re.IGNORECASE)
+
+
+def _extract_json_text(text: str) -> str:
+    """从 LLM 回复中提取 JSON 对象字符串（支持前言 + markdown 代码块）。"""
+    raw = (text or "").strip()
+    if not raw:
+        raise ValueError("empty response")
+
+    candidates = [raw]
+    fence = _FENCE_RE.search(raw)
+    if fence:
+        candidates.insert(0, fence.group(1).strip())
+
+    for candidate in candidates:
+        if candidate.startswith("{") and candidate.endswith("}"):
+            return candidate
+        try:
+            obj = _find_balanced_object(candidate)
+            if obj:
+                return obj
+        except ValueError:
+            continue
+
+    raise ValueError("no JSON object found")
+
+
+def _find_balanced_object(text: str) -> str:
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("no opening brace")
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    raise ValueError("unbalanced JSON object")
+
+
+def parse_llm_json(text: str) -> Dict[str, Any]:
+    """解析 LLM 返回的 JSON 对象（容忍 markdown 与前后说明文字）。"""
+    payload = _extract_json_text(text)
+    data = json.loads(payload)
+    if not isinstance(data, dict):
+        raise ValueError("expected JSON object")
+    return data
 
 
 def chat_completion(
@@ -103,14 +168,7 @@ def chat_json(
     msgs = [{"role": "system", "content": sys}] + messages
     msg = chat_completion(msgs, temperature=0.1)
     text = (msg.get("content") or "").strip()
-    if text.startswith("```"):
-        text = text.split("```", 2)[1]
-        if text.startswith("json"):
-            text = text[4:]
     try:
-        data = json.loads(text)
-        if not isinstance(data, dict):
-            raise ValueError("expected object")
-        return data
+        return parse_llm_json(text)
     except (json.JSONDecodeError, ValueError) as exc:
         raise FXPGError(f"LLM 返回非 JSON: {text[:200]}", code="AGENT_LLM_INVALID", status=502) from exc

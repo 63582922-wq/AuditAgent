@@ -295,6 +295,7 @@ export function resolveLiveProgress(
 export const PIPELINE_RUNNING_STATUSES = new Set<string>([
   "planning",
   "classifying",
+  "vision_parsing",
   "parsing",
   "extracting",
   "running_rules",

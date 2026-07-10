@@ -42,6 +42,7 @@ def agent_modality(agent_id: str, cfg: dict) -> str:
         "presentation_material",
         "speaker_profile",
         "invoice_image",
+        "other_supporting_evidence",
     }
     if doc_types and doc_types <= image_cats:
         return "vision"

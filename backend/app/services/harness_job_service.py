@@ -7,6 +7,7 @@ from app.exceptions import FXPGError
 from app.models import AnalysisJob, FileRecord, Project
 from app.services.jobs.worker import create_job, enqueue_harness
 from app.services.meeting_service import get_meeting
+from app.services.agent.case_run import create_case_run
 
 
 def start_harness_job(
@@ -34,11 +35,19 @@ def start_harness_job(
         raise FXPGError("请先为该子会议上传统计资料", code="NO_FILES", status=400)
 
     job = create_job(db, project_id, meeting_id=meeting_id)
+    run = create_case_run(
+        db,
+        project_id,
+        meeting_id,
+        job_id=job.id,
+        execution_mode="compliance_harness",
+    )
     meeting = get_meeting(db, project_id, meeting_id)
     meeting.status = "planning"
     state = dict(meeting.state_json or {})
     state["execution_mode"] = "compliance_harness"
     state["agent_domain"] = state.get("agent_domain") or "compliance"
+    state["active_run_id"] = run.id
     meeting.state_json = state
     project.status = "active"
     db.commit()

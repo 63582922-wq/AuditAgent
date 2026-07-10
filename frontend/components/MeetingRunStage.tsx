@@ -16,7 +16,8 @@ export function MeetingRunStage() {
 
   if (!ctx) return null;
 
-  const { live, job, traceLogs, pendingRun } = ctx;
+  const { live, job, traceLogs, pendingRun, notFound } = ctx;
+  if (notFound) return null;
   if (!live) {
     if (!pendingRun) return null;
     return (
@@ -37,6 +38,7 @@ export function MeetingRunStage() {
           job={undefined}
           livePulse
           embedded
+          traceLogs={traceLogs}
           className="run-stage__graph"
         />
         <div className="run-stage__trace">
@@ -94,7 +96,7 @@ export function MeetingRunStage() {
         <i style={{ width: `${running ? pct : 4}%` }} className={running ? undefined : "run-stage__bar-indeterminate"} />
       </div>
 
-      <LiveWorkflowGraph live={live} job={job} livePulse={running} embedded className="run-stage__graph" />
+      <LiveWorkflowGraph live={live} job={job} livePulse={running} embedded traceLogs={traceLogs} className="run-stage__graph" />
 
       <div className="run-stage__trace">
         <p className="run-stage__trace-label">{t("hud.traceLabel")}</p>

@@ -1,0 +1,65 @@
+[
+  {
+    "case_id": "A1P260307357",
+    "case_name": "Remote_A1P260307357_20260506_Luo, Amy Yun_Supporting",
+    "source_folder": "FX/Remote_A1P260307357_20260506_Luo, Amy Yun_Supporting",
+    "expected_file_count": 28,
+    "expected_categories": {
+      "meeting_screenshot": 12,
+      "coordination_sms": 5,
+      "sign_in_record": 3,
+      "a1_meeting_export": 1,
+      "observation_confirmation": 3,
+      "presentation_material": 2,
+      "meeting_agenda": 1,
+      "speaker_profile": 1
+    },
+    "expected_facts": {
+      "actual_sign_in_count": 7,
+      "planned_attendees": 6,
+      "attendance_delta": 1,
+      "material_code": "M-CN-00013658",
+      "presentation_topic": "SALWEEN研究：重塑PCV初治患者一线新标准"
+    },
+    "expected_template": {
+      "columns": 143,
+      "filled_row2": 143
+    },
+    "required_outputs": ["fixed_template_excel", "deliverable_package"],
+    "forbidden_loose_outputs": ["finding_excel", "evidence_index", "missing_docs", "correction_list", "material_parse_index"]
+  },
+  {
+    "case_id": "SMS202606090070",
+    "case_name": "Remote_SMS202606090070_20260615_Lei, Lily Yuli_Supporting",
+    "source_folder": "FX/Remote_SMS202606090070_20260615_Lei, Lily Yuli_Supporting",
+    "expected_file_count": 56,
+    "expected_categories": {
+      "presentation_material": 1,
+      "coordination_sms": 3,
+      "meeting_screenshot": 44,
+      "observation_confirmation": 3,
+      "meeting_agenda": 1,
+      "other_supporting_evidence": 2,
+      "sign_in_record": 1,
+      "speaker_profile": 1
+    },
+    "expected_facts": {
+      "attendance_source": "watch_record",
+      "watch_record_count": 60,
+      "actual_sign_in_count": null,
+      "planned_attendees": 7,
+      "attendance_delta": null,
+      "max_attendee_count": 15,
+      "zoom_peak_count": 15,
+      "total_attendance_expression": "5+60人次",
+      "material_code": "P-HPK-2025.05-090",
+      "presentation_topic": "新剂型-助力HER2阳性晚期一线走向高质量治愈"
+    },
+    "expected_template": {
+      "columns": 143,
+      "filled_row2": 143
+    },
+    "required_outputs": ["fixed_template_excel", "deliverable_package"],
+    "forbidden_loose_outputs": ["finding_excel", "evidence_index", "missing_docs", "correction_list", "material_parse_index"]
+  }
+]

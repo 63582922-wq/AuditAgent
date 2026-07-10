@@ -18,6 +18,14 @@ _DEFAULT_CORS = [
 
 def _normalize_database_url(url: str) -> str:
     """Render 等托管返回 postgres://，SQLAlchemy 需 postgresql+psycopg2://。"""
+    if url.startswith("sqlite:///") and not url.startswith("sqlite:////"):
+        raw_path = url[len("sqlite:///") :]
+        if raw_path and raw_path != ":memory:":
+            path = Path(raw_path)
+            if not path.is_absolute():
+                return f"sqlite:///{(_BACKEND_DIR / path).resolve()}"
+    if url == "sqlite:///:memory:":
+        return url
     if url.startswith("postgres://"):
         return "postgresql+psycopg2://" + url[len("postgres://") :]
     if url.startswith("postgresql://") and "+psycopg2" not in url and "+asyncpg" not in url:
@@ -48,6 +56,9 @@ class Settings(BaseSettings):
     vision_inter_request_delay_sec: float = Field(
         default=0.8, validation_alias="VISION_INTER_REQUEST_DELAY_SEC"
     )
+    vision_max_workers: int = Field(default=3, validation_alias="VISION_MAX_WORKERS")
+    vision_high_risk_min_passes: int = Field(default=2, validation_alias="VISION_HIGH_RISK_MIN_PASSES")
+    pdf_vision_max_pages: int = Field(default=120, validation_alias="PDF_VISION_MAX_PAGES")
 
     # 兼容旧变量名 OPENAI_*
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
@@ -58,6 +69,7 @@ class Settings(BaseSettings):
     api_key: str = ""
     max_upload_mb: int = 50
     job_workers: int = 2
+    job_recovery_stale_sec: int = Field(default=300, validation_alias="JOB_RECOVERY_STALE_SEC")
     human_gate_manual_threshold: int = 5
     human_gate_manual_ratio: float = 0.45
     human_gate_high_threshold: int = 3

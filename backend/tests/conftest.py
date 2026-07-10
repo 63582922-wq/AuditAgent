@@ -1,10 +1,16 @@
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+_TEST_DB = Path(tempfile.gettempdir()) / f"fxpg_pytest_{os.getpid()}.db"
+_TEST_DB.unlink(missing_ok=True)
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
 
 
 @pytest.fixture
@@ -101,7 +107,7 @@ def mock_agent_llm(monkeypatch):
             return {"role": "assistant", "content": adjudicate_batch_json}
         return {"role": "assistant", "content": plan_json}
 
-    def fake_chat_json(messages, schema_hint=""):
+    def fake_chat_json(messages, schema_hint="", domain=None):
         last = messages[-1]["content"] if messages else ""
         if "综合研判" in last or "待研判风险" in last:
             data = json.loads(adjudicate_batch_json)

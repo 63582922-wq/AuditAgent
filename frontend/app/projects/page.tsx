@@ -1,11 +1,60 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { PageTop } from "@/components/PageChrome";
 import { Project, api, batchDeleteProjects, updateProject } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatDate } from "@/lib/format";
+
+const PROJECTS_PAGE_SIZE = 50;
+
+async function deleteProjectsWithFallback(projectIds: string[]) {
+  const ids = Array.from(new Set(projectIds));
+  let batchDeleted = 0;
+  let batchError = "";
+
+  try {
+    const result = await batchDeleteProjects(ids);
+    batchDeleted = result.deleted;
+  } catch (e) {
+    batchError = e instanceof Error ? e.message : String(e);
+  }
+
+  const afterBatch = await api<Project[]>("/projects", { cache: "no-store" });
+  const afterBatchIds = new Set(afterBatch.map((p) => p.id));
+  const remainingIds = ids.filter((id) => afterBatchIds.has(id));
+
+  let fallbackDeleted = 0;
+  for (const id of remainingIds) {
+    try {
+      await api(`/projects/${id}`, { method: "DELETE" });
+      fallbackDeleted += 1;
+    } catch {
+      /* final refresh below calculates the actual remaining IDs */
+    }
+  }
+
+  const afterFallback = remainingIds.length
+    ? await api<Project[]>("/projects", { cache: "no-store" })
+    : afterBatch;
+  const finalIds = new Set(afterFallback.map((p) => p.id));
+  const stillRemainingIds = ids.filter((id) => finalIds.has(id));
+  const deleted = ids.length - stillRemainingIds.length;
+
+  if (deleted === 0 && batchError) {
+    throw new Error(batchError);
+  }
+
+  return {
+    requested: ids.length,
+    batchDeleted,
+    fallbackDeleted,
+    deleted,
+    failed: stillRemainingIds.length,
+    remainingIds: stillRemainingIds,
+  };
+}
 
 export default function ProjectsPage() {
   const { t, messages } = useI18n();
@@ -15,56 +64,141 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
+  const [batchBusy, setBatchBusy] = useState(false);
   const [pageMsg, setPageMsg] = useState("");
+  const [pageMsgKind, setPageMsgKind] = useState<"danger" | "success">("danger");
 
-  function load() {
+  async function load() {
     setLoading(true);
-    api<Project[]>("/projects")
-      .then(setProjects)
-      .catch((e) => setPageMsg(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
+    try {
+      const nextProjects = await api<Project[]>("/projects", { cache: "no-store" });
+      setProjects(nextProjects);
+      const validIds = new Set(nextProjects.map((p) => p.id));
+      setSelected((prev) => new Set(Array.from(prev).filter((id) => validIds.has(id))));
+      return nextProjects;
+    } catch (e) {
+      setPageMsgKind("danger");
+      setPageMsg(e instanceof Error ? e.message : String(e));
+      return [];
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
-  const allSelected = projects.length > 0 && selected.size === projects.length;
+  const filteredProjects = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) =>
+      [p.name, p.status, p.summary || ""].some((value) => value.toLowerCase().includes(q))
+    );
+  }, [projects, query]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredProjects.length / PROJECTS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleProjects = useMemo(() => {
+    const start = (currentPage - 1) * PROJECTS_PAGE_SIZE;
+    return filteredProjects.slice(start, start + PROJECTS_PAGE_SIZE);
+  }, [currentPage, filteredProjects]);
+  const visibleProjectIds = useMemo(() => visibleProjects.map((p) => p.id), [visibleProjects]);
+  const selectedVisibleCount = visibleProjectIds.filter((id) => selected.has(id)).length;
+  const allSelected = visibleProjectIds.length > 0 && selectedVisibleCount === visibleProjectIds.length;
+  const actionBusy = batchBusy || savingId !== null || deleteBusyId !== null;
+
+  useEffect(() => {
+    setPage(1);
+  }, [query]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   function toggleAll() {
-    if (allSelected) setSelected(new Set());
-    else setSelected(new Set(projects.map((p) => p.id)));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) visibleProjectIds.forEach((id) => next.delete(id));
+      else visibleProjectIds.forEach((id) => next.add(id));
+      return next;
+    });
   }
 
   async function saveEdit(id: string) {
+    const name = editName.trim();
+    if (!name) {
+      setPageMsgKind("danger");
+      setPageMsg(t("projects.nameRequired"));
+      return;
+    }
+    setSavingId(id);
+    setPageMsg("");
     try {
-      await updateProject(id, { name: editName.trim() });
+      await updateProject(id, { name });
       setEditId(null);
-      load();
+      setEditName("");
+      setPageMsgKind("success");
+      setPageMsg(t("projects.saved"));
+      void load();
     } catch (e) {
+      setPageMsgKind("danger");
       setPageMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingId(null);
     }
   }
 
   async function removeOne(id: string, name: string) {
     if (!confirm(t("projects.confirmDelete", { name }))) return;
+    setDeleteBusyId(id);
+    setPageMsg("");
     try {
       await api(`/projects/${id}`, { method: "DELETE" });
-      load();
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setPageMsgKind("success");
+      setPageMsg(t("projects.deletedOne", { name }));
+      void load();
     } catch (e) {
+      setPageMsgKind("danger");
       setPageMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleteBusyId(null);
     }
   }
 
   async function removeSelected() {
     if (!selected.size || !confirm(t("projects.confirmBatch", { count: selected.size }))) return;
+    const ids = Array.from(selected);
+    setBatchBusy(true);
+    setPageMsg("");
     try {
-      await batchDeleteProjects(Array.from(selected));
-      setSelected(new Set());
-      load();
+      const result = await deleteProjectsWithFallback(ids);
+      setSelected(new Set(result.remainingIds));
+      await load();
+      if (result.deleted <= 0) {
+        setPageMsgKind("danger");
+        setPageMsg(t("projects.deleteNone"));
+      } else if (result.deleted < result.requested) {
+        setPageMsgKind("danger");
+        setPageMsg(t("projects.deletedPartial", { deleted: result.deleted, count: result.requested, failed: result.failed }));
+      } else {
+        setPageMsgKind("success");
+        setPageMsg(t("projects.deletedSelected", { count: result.deleted }));
+      }
     } catch (e) {
+      setPageMsgKind("danger");
       setPageMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBatchBusy(false);
     }
   }
 
@@ -80,18 +214,60 @@ export default function ProjectsPage() {
         }
       />
 
-      {pageMsg && <p className="alert danger">{pageMsg}</p>}
+      {pageMsg && <p className={`alert ${pageMsgKind}`}>{pageMsg}</p>}
 
       <div className="table-toolbar">
-        <label className="check-row">
-          <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!projects.length} />
-          {t("rail.selectAll")}
-        </label>
+        <div className="table-toolbar__controls">
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleAll}
+              disabled={!visibleProjects.length || loading || batchBusy}
+            />
+            {t("projects.selectVisible")}
+          </label>
+          <input
+            className="input input-sm table-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("projects.searchPlaceholder")}
+            disabled={loading || batchBusy}
+          />
+          <span className="muted table-count">
+            {t("projects.pageStatus", { page: currentPage, total: totalPages, count: filteredProjects.length })}
+          </span>
+        </div>
         {selected.size > 0 && (
-          <button type="button" className="btn-text btn-text--danger" onClick={removeSelected}>
-            {t("projects.deleteSelected")} ({selected.size})
-          </button>
+          <div className="table-toolbar__actions">
+            <button
+              type="button"
+              className="btn-text btn-text--danger"
+              onClick={removeSelected}
+              disabled={batchBusy || loading}
+            >
+              {batchBusy ? t("projects.deleteSelectedBusy") : t("projects.deleteSelected")} ({selected.size})
+            </button>
+          </div>
         )}
+        <div className="table-pager">
+          <button
+            type="button"
+            className="btn-text"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={loading || currentPage <= 1}
+          >
+            {t("projects.prevPage")}
+          </button>
+          <button
+            type="button"
+            className="btn-text"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={loading || currentPage >= totalPages}
+          >
+            {t("projects.nextPage")}
+          </button>
+        </div>
       </div>
 
       <table className="data-table">
@@ -113,12 +289,13 @@ export default function ProjectsPage() {
             </tr>
           )}
           {!loading &&
-            projects.map((p) => (
+            visibleProjects.map((p) => (
               <tr key={p.id}>
                 <td>
                   <input
                     type="checkbox"
                     checked={selected.has(p.id)}
+                    disabled={batchBusy || deleteBusyId === p.id}
                     onChange={() =>
                       setSelected((prev) => {
                         const n = new Set(prev);
@@ -136,6 +313,7 @@ export default function ProjectsPage() {
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && saveEdit(p.id)}
+                      disabled={savingId === p.id}
                     />
                   ) : (
                     <Link href={`/projects/${p.id}`} className="strong">
@@ -154,10 +332,10 @@ export default function ProjectsPage() {
                   <div className="table-actions">
                   {editId === p.id ? (
                     <>
-                      <button type="button" className="btn-text" onClick={() => saveEdit(p.id)}>
-                        {t("common.save")}
+                      <button type="button" className="btn-text" onClick={() => saveEdit(p.id)} disabled={savingId === p.id}>
+                        {savingId === p.id ? t("common.processing") : t("common.save")}
                       </button>
-                      <button type="button" className="btn-text" onClick={() => setEditId(null)}>
+                      <button type="button" className="btn-text" onClick={() => setEditId(null)} disabled={savingId === p.id}>
                         {t("common.cancel")}
                       </button>
                     </>
@@ -170,11 +348,17 @@ export default function ProjectsPage() {
                           setEditId(p.id);
                           setEditName(p.name);
                         }}
+                        disabled={actionBusy}
                       >
                         {t("common.edit")}
                       </button>
-                      <button type="button" className="btn-text btn-text--danger" onClick={() => removeOne(p.id, p.name)}>
-                        {t("common.delete")}
+                      <button
+                        type="button"
+                        className="btn-text btn-text--danger"
+                        onClick={() => removeOne(p.id, p.name)}
+                        disabled={actionBusy}
+                      >
+                        {deleteBusyId === p.id ? t("common.processing") : t("common.delete")}
                       </button>
                     </>
                   )}
@@ -186,6 +370,13 @@ export default function ProjectsPage() {
             <tr>
               <td colSpan={5} className="empty">
                 {t("projects.empty")} · <Link href="/projects/new">{t("common.create")}</Link>
+              </td>
+            </tr>
+          )}
+          {!loading && projects.length > 0 && filteredProjects.length === 0 && (
+            <tr>
+              <td colSpan={5} className="empty">
+                {t("projects.noMatches")}
               </td>
             </tr>
           )}

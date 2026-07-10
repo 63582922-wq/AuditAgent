@@ -6,8 +6,9 @@ from fastapi.testclient import TestClient
 
 from app.database import SessionLocal, init_db
 from app.main import app
-from app.models import FileRecord, Project, Risk
+from app.models import AgentActionProposal, AnalysisJob, FileRecord, LearningProposal, Output, Project, Risk
 from app.services.agent.workflow import AgentWorkflow
+from app.services.meeting_service import create_meeting
 from app.services.seed import seed_rules
 
 
@@ -66,3 +67,146 @@ def test_dismissed_risks_excluded_from_outputs(db, tmp_path):
     wf.regenerate_outputs_only()
     active = db.query(Risk).filter_by(project_id=p.id).filter(Risk.status != "dismissed").count()
     assert active == len(risks) - 1
+
+
+def test_batch_delete_project_removes_new_project_child_tables(client, db):
+    project = Project(name="删除级联测试", status="active")
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    meeting = create_meeting(db, project.id, meeting_code="DEL001")
+    proposal = AgentActionProposal(
+        project_id=project.id,
+        meeting_id=meeting.id,
+        action_id="test-action",
+        label="测试动作",
+        description="测试删除级联",
+        segment="files",
+    )
+    db.add(proposal)
+    db.commit()
+    project_id = project.id
+    proposal_id = proposal.id
+
+    res = client.post("/api/projects/batch-delete", json={"project_ids": [project_id]})
+
+    assert res.status_code == 200
+    assert res.json()["deleted"] == 1
+    db.expire_all()
+    assert db.get(Project, project_id) is None
+    assert db.get(AgentActionProposal, proposal_id) is None
+
+
+def test_agent_feedback_is_governed_and_meeting_job_can_be_cancelled(client, db):
+    project = Project(name="受控学习与取消测试", status="active")
+    db.add(project)
+    db.commit()
+    meeting = create_meeting(db, project.id, meeting_code="GOVERNED-001")
+    job = AnalysisJob(
+        project_id=project.id,
+        meeting_id=meeting.id,
+        status="queued",
+        current_step="queued",
+        progress_pct=0,
+    )
+    db.add(job)
+    db.commit()
+
+    feedback = client.post(
+        "/api/agent/feedback",
+        json={
+            "project_id": project.id,
+            "meeting_id": meeting.id,
+            "feedback": "确认单里的实际参会人数应以平台峰值为准。",
+            "original_conclusion": "当前人数为 12",
+        },
+    )
+    assert feedback.status_code == 200
+    assert feedback.json()["status"] == "pending"
+    assert db.query(LearningProposal).filter_by(project_id=project.id, meeting_id=meeting.id).count() == 1
+
+    cancelled = client.post(f"/api/projects/{project.id}/meetings/{meeting.id}/jobs/{job.id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancel_requested"
+    db.refresh(job)
+    assert job.status == "cancel_requested"
+
+
+def test_delivery_acceptance_api_blocks_preview_with_unresolved_template_fields(client, db):
+    project = Project(name="交付门禁测试", status="active")
+    db.add(project)
+    db.commit()
+    meeting = create_meeting(db, project.id, meeting_code="GATE-001")
+    meeting.status = "needs_review"
+    meeting.deliverable_json = {
+        "status": "needs_review",
+        "template_quality": {"status": "needs_review", "issue_field_count": 4},
+        "evidence_gate": {"blocked": False},
+        "evaluation_gate": {"blocked": False},
+    }
+    db.add_all(
+        [
+            Output(
+                project_id=project.id,
+                meeting_id=meeting.id,
+                output_type="fixed_template_excel",
+                file_name="固定模板输出.xlsx",
+                storage_path="/tmp/gate-template.xlsx",
+            ),
+            Output(
+                project_id=project.id,
+                meeting_id=meeting.id,
+                output_type="deliverable_package",
+                file_name="GATE-001.zip",
+                storage_path="/tmp/gate.zip",
+            ),
+        ]
+    )
+    db.commit()
+
+    response = client.post(f"/api/projects/{project.id}/meetings/{meeting.id}/deliverables/accept")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "DELIVERY_GATE_BLOCKED"
+    db.refresh(meeting)
+    assert meeting.status == "needs_review"
+
+
+def test_meeting_live_exposes_the_same_formal_delivery_gate(client, db):
+    project = Project(name="交付门禁状态测试", status="active")
+    db.add(project)
+    db.commit()
+    meeting = create_meeting(db, project.id, meeting_code="GATE-LIVE-001")
+    meeting.status = "completed"
+    meeting.deliverable_json = {
+        "status": "pending",
+        "template_quality": {"status": "pass"},
+        "evidence_gate": {"blocked": False},
+        "evaluation_gate": {"blocked": False},
+    }
+    db.add_all(
+        [
+            Output(
+                project_id=project.id,
+                meeting_id=meeting.id,
+                output_type="fixed_template_excel",
+                file_name="固定模板输出.xlsx",
+                storage_path="/tmp/gate-live-template.xlsx",
+            ),
+            Output(
+                project_id=project.id,
+                meeting_id=meeting.id,
+                output_type="deliverable_package",
+                file_name="GATE-LIVE-001.zip",
+                storage_path="/tmp/gate-live.zip",
+            ),
+        ]
+    )
+    db.commit()
+
+    response = client.get(f"/api/projects/{project.id}/meetings/{meeting.id}/live")
+
+    assert response.status_code == 200
+    gate = response.json()["state_json"]["deliverable"]["formal_acceptance_gate"]
+    assert gate["blocked"] is False
+    assert gate["reason"] == "formal_delivery_ready"

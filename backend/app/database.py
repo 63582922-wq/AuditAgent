@@ -45,6 +45,7 @@ MEETING_FK_TABLES = (
     "risks",
     "outputs",
     "agent_run_logs",
+    "agent_action_proposals",
     "analysis_jobs",
     "record_links",
 )

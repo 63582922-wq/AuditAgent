@@ -78,6 +78,7 @@ def adjudicate_batch(
     db: Optional[Session],
     risks: List[Dict[str, Any]],
     plan: Optional[Dict[str, Any]] = None,
+    memory_text: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """批量 LLM 研判（单批）。"""
     require_agent_llm()
@@ -85,9 +86,8 @@ def adjudicate_batch(
     if not risks:
         return []
 
-    query = " ".join(f"{r.get('risk_category')} {r.get('problem')}" for r in risks[:3])
-    mems = retrieve_memories(db, query_text=query, limit=5)
-    memory_text = format_memories_for_prompt(mems)
+    if memory_text is None:
+        memory_text = _memory_text_for_risks(db, risks)
 
     domain = plan.get("agent_domain") or settings.agent_domain
     result = chat_json(
@@ -132,6 +132,12 @@ def _chunk_risks(risks: List[Dict[str, Any]], size: int) -> List[List[Dict[str, 
     return [risks[i : i + size] for i in range(0, len(risks), size)]
 
 
+def _memory_text_for_risks(db: Optional[Session], risks: List[Dict[str, Any]]) -> str:
+    query = " ".join(f"{r.get('risk_category')} {r.get('problem')}" for r in risks[:5])
+    mems = retrieve_memories(db, query_text=query, limit=5)
+    return format_memories_for_prompt(mems)
+
+
 def adjudicate_risks(
     db: Optional[Session],
     risks: List[Dict[str, Any]],
@@ -146,15 +152,16 @@ def adjudicate_risks(
         risks,
         key=lambda r: {"高": 0, "中": 1, "低": 2}.get(r.get("risk_level", "低"), 3),
     )
+    memory_text = _memory_text_for_risks(db, sorted_risks)
     batches = _chunk_risks(sorted_risks, ADJUDICATE_BATCH_SIZE)
     workers = min(ADJUDICATE_MAX_WORKERS, max(1, settings.job_workers))
     adjudicated: List[Dict[str, Any]] = []
 
     if len(batches) == 1:
-        adjudicated = adjudicate_batch(db, batches[0], plan)
+        adjudicated = adjudicate_batch(None, batches[0], plan, memory_text)
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(adjudicate_batch, db, batch, plan): batch for batch in batches}
+            futures = {pool.submit(adjudicate_batch, None, batch, plan, memory_text): batch for batch in batches}
             for future in as_completed(futures):
                 adjudicated.extend(future.result())
 

@@ -221,6 +221,26 @@ class AgentRunLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
 
+class AgentActionProposal(Base):
+    __tablename__ = "agent_action_proposals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id"), nullable=True)
+    action_id: Mapped[str] = mapped_column(String(100))
+    label: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text)
+    segment: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    payload_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    result_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
+    )
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class AnalysisJob(Base):
     __tablename__ = "analysis_jobs"
 
@@ -234,6 +254,97 @@ class AnalysisJob(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
+
+
+class CaseRun(Base):
+    """Immutable-ish audit run envelope for one meeting execution.
+
+    The existing ``AnalysisJob`` remains the queue primitive.  A CaseRun is the
+    audit record: it snapshots inputs and model/rule versions, owns evidence
+    claims, and survives job retries or a later rerun.
+    """
+
+    __tablename__ = "case_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    meeting_id: Mapped[str] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"))
+    job_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    run_kind: Mapped[str] = mapped_column(String(50), default="full")
+    execution_mode: Mapped[str] = mapped_column(String(100), default="compliance_harness")
+    status: Mapped[str] = mapped_column(String(50), default="queued")
+    input_snapshot_json: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+    runtime_snapshot_json: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+    result_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
+
+
+class EvidenceClaim(Base):
+    """A single auditable observation extracted from a document or case source."""
+
+    __tablename__ = "evidence_claims"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("case_runs.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    meeting_id: Mapped[str] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"), index=True)
+    file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
+    claim_key: Mapped[str] = mapped_column(String(160), index=True)
+    value_json: Mapped[Any] = mapped_column(JSON)
+    source_kind: Mapped[str] = mapped_column(String(80))
+    source_priority: Mapped[int] = mapped_column(Integer, default=0)
+    extraction_pass: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    region_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    evidence_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(50), default="accepted")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
+
+
+class FactDecision(Base):
+    """The chosen value for a fact, including conflicting alternatives."""
+
+    __tablename__ = "fact_decisions"
+    __table_args__ = (UniqueConstraint("run_id", "fact_key", name="uq_fact_decision_run_key"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("case_runs.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    meeting_id: Mapped[str] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"), index=True)
+    fact_key: Mapped[str] = mapped_column(String(160), index=True)
+    value_json: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="missing")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    decision_method: Mapped[str] = mapped_column(String(100), default="source_priority")
+    claim_ids_json: Mapped[List[str]] = mapped_column(JSON, default=list)
+    conflict_json: Mapped[Optional[List[Any]]] = mapped_column(JSON, nullable=True)
+    source_summary_json: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc)
+    )
+
+
+class LearningProposal(Base):
+    """A governed user correction that cannot modify live policy by itself."""
+
+    __tablename__ = "learning_proposals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    meeting_id: Mapped[Optional[str]] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"), nullable=True, index=True)
+    feedback_text: Mapped[str] = mapped_column(Text)
+    original_conclusion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    proposed_patch_json: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+    required_case_ids: Mapped[List[str]] = mapped_column(JSON, default=list)
+    regression_plan_json: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc))
 
 

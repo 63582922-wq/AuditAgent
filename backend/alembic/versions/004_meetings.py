@@ -28,40 +28,57 @@ MEETING_FK_TABLES = (
 
 
 def upgrade() -> None:
-    op.create_table(
-        "meetings",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("project_id", sa.String(36), sa.ForeignKey("projects.id"), nullable=False),
-        sa.Column("meeting_code", sa.String(64), nullable=False),
-        sa.Column("meeting_title", sa.String(512), nullable=True),
-        sa.Column("observation_type", sa.String(100), nullable=True),
-        sa.Column("meeting_type", sa.String(100), nullable=True),
-        sa.Column("meeting_date", sa.String(32), nullable=True),
-        sa.Column("status", sa.String(50), nullable=False, server_default="draft"),
-        sa.Column("summary", sa.Text(), nullable=True),
-        sa.Column("state_json", sa.JSON(), nullable=True),
-        sa.Column("deliverable_json", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.Column("last_run_at", sa.DateTime(), nullable=True),
-        sa.UniqueConstraint("project_id", "meeting_code", name="uq_meetings_project_code"),
-    )
-    op.create_index("ix_meetings_project_id", "meetings", ["project_id"])
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+    if "meetings" not in tables:
+        op.create_table(
+            "meetings",
+            sa.Column("id", sa.String(36), primary_key=True),
+            sa.Column("project_id", sa.String(36), sa.ForeignKey("projects.id"), nullable=False),
+            sa.Column("meeting_code", sa.String(64), nullable=False),
+            sa.Column("meeting_title", sa.String(512), nullable=True),
+            sa.Column("observation_type", sa.String(100), nullable=True),
+            sa.Column("meeting_type", sa.String(100), nullable=True),
+            sa.Column("meeting_date", sa.String(32), nullable=True),
+            sa.Column("status", sa.String(50), nullable=False, server_default="draft"),
+            sa.Column("summary", sa.Text(), nullable=True),
+            sa.Column("state_json", sa.JSON(), nullable=True),
+            sa.Column("deliverable_json", sa.JSON(), nullable=True),
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+            sa.Column("updated_at", sa.DateTime(), nullable=False),
+            sa.Column("last_run_at", sa.DateTime(), nullable=True),
+            sa.UniqueConstraint("project_id", "meeting_code", name="uq_meetings_project_code"),
+        )
+        tables.add("meetings")
+        inspector = sa.inspect(bind)
+    meeting_indexes = {item["name"] for item in inspector.get_indexes("meetings")}
+    if "ix_meetings_project_id" not in meeting_indexes:
+        op.create_index("ix_meetings_project_id", "meetings", ["project_id"])
 
     for table in MEETING_FK_TABLES:
-        op.add_column(table, sa.Column("meeting_id", sa.String(36), nullable=True))
-        op.create_foreign_key(
-            f"fk_{table}_meeting_id",
-            table,
-            "meetings",
-            ["meeting_id"],
-            ["id"],
-        )
-        op.create_index(f"ix_{table}_meeting_id", table, ["meeting_id"])
+        if table not in tables:
+            continue
+        columns = {column["name"] for column in inspector.get_columns(table)}
+        added_column = "meeting_id" not in columns
+        if added_column:
+            op.add_column(table, sa.Column("meeting_id", sa.String(36), nullable=True))
+            # SQLite cannot add a foreign-key constraint after table creation.
+            if bind.dialect.name != "sqlite":
+                op.create_foreign_key(
+                    f"fk_{table}_meeting_id",
+                    table,
+                    "meetings",
+                    ["meeting_id"],
+                    ["id"],
+                )
+            inspector = sa.inspect(bind)
+        index_names = {item["name"] for item in inspector.get_indexes(table)}
+        index_name = f"ix_{table}_meeting_id"
+        if index_name not in index_names:
+            op.create_index(index_name, table, ["meeting_id"])
 
-    bind = op.get_bind()
     projects = bind.execute(sa.text("SELECT id, name, status, state_json, summary FROM projects")).fetchall()
-    now_expr = sa.text("CURRENT_TIMESTAMP")
     for row in projects:
         pid, name, status, state_json, summary = row
         state = state_json or {}

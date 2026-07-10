@@ -61,7 +61,9 @@
   --text-3: rgba(30, 26, 23, 0.38);
 }
 
-body::after { display: none !important; }
+body::after {
+  display: none !important;
+}
 
 body {
   letter-spacing: -0.01em;
@@ -253,34 +255,105 @@ a:hover {
   min-width: 0 !important;
   overflow-x: hidden !important;
   flex: 1 !important;
+  margin-right: var(--agent-w, 328px) !important;
+}
+
+.shell {
+  --agent-w: 328px;
+}
+
+.shell-agent {
+  --agent-w: 328px;
+  width: var(--agent-w) !important;
+}
+
+.main-agent-panel__head {
+  padding: 0.95rem 1rem 0.8rem !important;
+}
+
+.main-agent-context {
+  padding: 0.75rem 1rem !important;
+  gap: 0.35rem !important;
+}
+
+.main-agent-messages {
+  padding: 0.9rem 1rem !important;
+}
+
+.main-agent-message {
+  gap: 0.5rem !important;
+  margin-bottom: 0.8rem !important;
+}
+
+.main-agent-message p {
+  width: auto !important;
+  border-radius: 10px !important;
+  line-height: 1.58 !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+}
+
+.main-agent-actions {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 0.4rem !important;
+}
+
+.main-agent-action {
+  flex: 0 1 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.35rem !important;
+  min-width: 0 !important;
+  padding: 0.38rem 0.55rem !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+}
+
+.main-agent-action strong {
+  display: inline-flex !important;
+  font-size: 0.72rem !important;
+}
+
+.main-agent-action:not([data-agent-proposal-id]) > span {
+  display: none !important;
+}
+
+.main-agent-action[data-agent-proposal-id] {
+  flex: 1 1 100% !important;
+  display: grid !important;
+  border-radius: 10px !important;
+}
+
+.main-agent-action[data-agent-proposal-id] > span {
+  display: block !important;
+}
+
+.main-agent-suggestions {
+  padding: 0 1rem 0.7rem !important;
+  gap: 0.4rem !important;
+}
+
+.main-agent-suggestions button {
+  border-radius: 999px !important;
+  padding: 0.28rem 0.55rem !important;
+  font-size: 0.72rem !important;
+}
+
+.main-agent-composer {
+  padding: 0.8rem 1rem 1rem !important;
+}
+
+.main-agent-input {
+  min-height: 68px !important;
 }
 
 /* ── Rail steps · 初稿时间轴 ── */
 .rail {
   padding-top: 0 !important;
 }
-.rail-crumb {
-  margin-bottom: 0 !important;
-  font-size: 0.625rem !important;
-  color: var(--text-3) !important;
-}
-.rail-crumb a {
-  color: var(--text-3) !important;
-}
-.rail-crumb a:hover {
-  color: var(--text-2) !important;
-}
-.rail-crumb__current {
-  color: var(--text-2) !important;
-}
-.rail-scope {
-  font-size: 0.625rem !important;
-  color: var(--text-3) !important;
-  margin-top: 0.5rem !important;
-}
 .rail-steps {
   list-style: none;
-  margin: 2.5rem 0 0 !important;
+  margin: 1.25rem 0 0 !important;
   padding: 0;
 }
 .rail-steps li {
@@ -291,42 +364,70 @@ a:hover {
   font-weight: 500;
   color: var(--text-3);
 }
-.rail-steps__link {
+.rail-steps__item {
   display: grid;
   grid-template-columns: 2.5rem 1fr;
   gap: 1rem;
   align-items: baseline;
   padding: 1.1rem 0;
   color: inherit;
-  text-decoration: none;
-  transition: color var(--ease-flow);
 }
-.rail-steps__link:hover {
-  color: var(--text-2);
-  text-decoration: none;
-}
-.rail-steps li.is-live .rail-steps__link {
+.rail-steps li.is-live .rail-steps__item {
   color: var(--text);
 }
-.rail-steps li.is-done .rail-steps__link {
+.rail-steps li.is-done .rail-steps__item {
   color: var(--text-2);
 }
 .rail-steps li span:first-child,
-.rail-steps__link > span:first-child {
+.rail-steps__item > span:first-child {
   font-family: var(--mono);
   font-size: 0.6875rem;
 }
 .rail-steps li.is-live span:first-child,
-.rail-steps li.is-live .rail-steps__link > span:first-child {
+.rail-steps li.is-live .rail-steps__item > span:first-child {
   color: var(--accent);
 }
 
 .rail-context {
   margin-top: 1rem;
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--cyber-line);
+  border-bottom: 1px solid var(--cyber-line);
   font-family: var(--mono);
   font-size: 0.625rem;
   line-height: 1.7;
   color: var(--text-3);
+}
+
+.rail-context__label {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--text-3);
+}
+
+.rail-context__code {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 0.9rem;
+  font-weight: 750;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-context p {
+  margin: 0.35rem 0 0;
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.rail-context--danger .rail-context__code {
+  color: var(--danger);
 }
 
 .rail-live {
@@ -336,7 +437,9 @@ a:hover {
   background: transparent !important;
   color: var(--accent) !important;
 }
-.rail-live__dot { display: none !important; }
+.rail-live__dot {
+  display: none !important;
+}
 
 .rail-pages__link {
   border-left: none !important;
@@ -360,7 +463,7 @@ a:hover {
 
 /* ── Settling stage (主舞台) ── */
 .settling-stage {
-  margin-bottom: 2.5rem;
+  margin-bottom: 1.75rem;
   padding-bottom: 0;
   border-bottom: none;
 }
@@ -414,7 +517,7 @@ a:hover {
   color: var(--text-3);
 }
 .settling-stage__metrics {
-  margin-top: 2.5rem;
+  margin-top: 1.75rem;
   display: flex;
   gap: 3rem;
   flex-wrap: wrap;
@@ -468,7 +571,9 @@ a:hover {
   box-shadow: none !important;
 }
 .fx-panel::before,
-.telemetry-panel::before { display: none !important; }
+.telemetry-panel::before {
+  display: none !important;
+}
 
 .page-top,
 .settling-page-top {
@@ -564,8 +669,15 @@ a:hover {
 }
 
 @keyframes run-beacon {
-  0%, 100% { opacity: 0.35; transform: scale(0.85); }
-  50% { opacity: 1; transform: scale(1); }
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .run-stage__hero {
@@ -622,9 +734,18 @@ a:hover {
 }
 
 @keyframes run-bar-indeterminate {
-  0% { width: 4% !important; margin-left: 0; }
-  50% { width: 38% !important; margin-left: 30%; }
-  100% { width: 4% !important; margin-left: 96%; }
+  0% {
+    width: 4% !important;
+    margin-left: 0;
+  }
+  50% {
+    width: 38% !important;
+    margin-left: 30%;
+  }
+  100% {
+    width: 4% !important;
+    margin-left: 96%;
+  }
 }
 
 /* 侧栏已有 01–04 阶段轴，运行态主区不重复 */
@@ -724,6 +845,10 @@ a:hover {
   grid-column: 1;
   font-weight: 500;
   color: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-stage__trace .live-trace__title::before {
@@ -742,6 +867,25 @@ a:hover {
 
 .run-stage__trace .live-trace__time {
   grid-column: 1 / -1;
+  font-size: 0.625rem;
+  color: var(--text-3);
+}
+
+.run-stage__trace .live-trace__message,
+.run-stage__trace .live-trace__code {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-stage__trace .live-trace__message {
+  color: var(--text-2);
+}
+
+.run-stage__trace .live-trace__code {
+  font-family: var(--mono);
   font-size: 0.625rem;
   color: var(--text-3);
 }
@@ -766,7 +910,9 @@ a:hover {
   padding-top: 0.75rem;
   border-top: 2px solid var(--cyber-line);
   color: var(--text-3);
-  transition: color var(--ease-flow), border-color var(--ease-flow);
+  transition:
+    color var(--ease-flow),
+    border-color var(--ease-flow);
 }
 
 .run-stage__phases li.is-done {
@@ -853,9 +999,2044 @@ a:hover {
 }
 
 .settling-stage__graph {
-  margin-top: 2.5rem;
-  padding-top: 1.5rem;
+  margin-top: 2rem;
+  padding-top: 1.25rem;
   border-top: 1px solid var(--cyber-line);
+}
+
+/* ── 实时运行拓扑 · 常驻深色指挥面板 ── */
+.runtime-graph {
+  --runtime-ease: cubic-bezier(0.45, 0.05, 0.2, 1);
+  --runtime-bg: #05080d;
+  --runtime-bg-2: #07111a;
+  --runtime-grid: rgba(75, 201, 240, 0.08);
+  --runtime-line: rgba(123, 246, 190, 0.24);
+  --runtime-line-soft: rgba(148, 163, 184, 0.16);
+  --runtime-text: rgba(238, 247, 255, 0.94);
+  --runtime-muted: rgba(164, 181, 196, 0.78);
+  --runtime-dim: rgba(116, 130, 143, 0.52);
+  --runtime-cyan: #42d9f4;
+  --runtime-green: #78f2ad;
+  --runtime-amber: #e0a24f;
+  --runtime-purple: #a987ff;
+  --runtime-red: #ff7a8a;
+  --runtime-panel: rgba(7, 16, 26, 0.86);
+  --runtime-panel-active: rgba(20, 54, 70, 0.9);
+  margin: 0;
+  color: var(--runtime-text);
+}
+
+.runtime-graph__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  padding-right: 0.75rem;
+  box-sizing: border-box;
+}
+
+.runtime-graph__eyebrow {
+  display: block;
+  font-size: 0.625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.runtime-graph__title {
+  margin: 0.25rem 0 0;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.runtime-graph__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
+.runtime-graph__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.runtime-graph__beacon {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--runtime-green);
+  box-shadow: 0 0 18px rgba(120, 242, 173, 0.9);
+  animation: run-beacon 1.7s ease-in-out infinite;
+}
+
+.runtime-graph__pct {
+  color: var(--text);
+  font-size: 1.2rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  min-width: 4ch;
+  text-align: right;
+}
+
+.runtime-graph__bar {
+  height: 3px;
+  margin-bottom: 0.85rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.runtime-graph__bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    var(--runtime-cyan),
+    var(--runtime-green),
+    var(--runtime-amber)
+  );
+  box-shadow: 0 0 22px rgba(66, 217, 244, 0.42);
+  transition: width 0.9s var(--runtime-ease);
+}
+
+.runtime-graph__canvas {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid rgba(75, 201, 240, 0.18);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(10, 23, 36, 0.96), rgba(4, 7, 11, 0.98)), var(--runtime-bg);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    inset 0 0 55px rgba(66, 217, 244, 0.06),
+    0 18px 48px rgba(0, 0, 0, 0.18);
+}
+
+.runtime-graph--embedded .runtime-graph__canvas {
+  border-radius: 12px;
+}
+
+.runtime-graph__svg {
+  display: block;
+  width: 100%;
+  min-width: 1120px;
+  height: clamp(430px, 56vh, 760px);
+  color: var(--runtime-text);
+}
+
+.runtime-graph--embedded .runtime-graph__svg,
+.run-stage__graph .runtime-graph__svg {
+  height: clamp(470px, 62vh, 820px);
+}
+
+.runtime-graph__backdrop {
+  fill: rgba(6, 14, 22, 0.95);
+  stroke: rgba(75, 201, 240, 0.16);
+}
+
+.runtime-graph__grid {
+  fill: url(#runtime-grid);
+  opacity: 0.95;
+}
+
+.runtime-graph__grid-line {
+  stroke: var(--runtime-grid);
+  stroke-width: 1;
+}
+
+.runtime-graph__lane {
+  stroke: rgba(120, 242, 173, 0.11);
+  stroke-width: 1;
+  stroke-dasharray: 5 12;
+}
+
+.runtime-graph__lane-label,
+.runtime-graph__stage-label {
+  fill: rgba(164, 181, 196, 0.62);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.runtime-graph__stage-line {
+  stroke: rgba(75, 201, 240, 0.1);
+  stroke-width: 1;
+}
+
+.runtime-graph__event-rail {
+  stroke: rgba(75, 201, 240, 0.18);
+  stroke-width: 1;
+}
+
+.runtime-graph__event-matrix {
+  fill: rgba(4, 10, 16, 0.74);
+  stroke: rgba(75, 201, 240, 0.16);
+  stroke-width: 1;
+}
+
+.runtime-graph__event-label {
+  fill: rgba(164, 181, 196, 0.58);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.runtime-graph__event-dot {
+  fill: rgba(148, 163, 184, 0.72);
+  stroke: rgba(255, 255, 255, 0.22);
+  stroke-width: 0.8;
+}
+
+.runtime-graph__event--done .runtime-graph__event-dot {
+  fill: rgba(120, 242, 173, 0.82);
+  stroke: rgba(120, 242, 173, 0.3);
+}
+
+.runtime-graph__event--active .runtime-graph__event-dot {
+  fill: var(--runtime-cyan);
+  stroke: rgba(255, 255, 255, 0.75);
+  filter: drop-shadow(0 0 8px rgba(66, 217, 244, 0.9));
+}
+
+.runtime-graph__event--failed .runtime-graph__event-dot {
+  fill: var(--runtime-red);
+  stroke: rgba(255, 122, 138, 0.52);
+}
+
+.runtime-graph__event--vision_agent .runtime-graph__event-dot {
+  fill: var(--runtime-cyan);
+}
+.runtime-graph__event--tool .runtime-graph__event-dot {
+  fill: var(--runtime-amber);
+}
+.runtime-graph__event--sub_agent .runtime-graph__event-dot {
+  fill: var(--runtime-purple);
+}
+.runtime-graph__event--critic .runtime-graph__event-dot {
+  fill: var(--runtime-red);
+}
+.runtime-graph__event--memory .runtime-graph__event-dot {
+  fill: #5eead4;
+}
+.runtime-graph__event--runtime .runtime-graph__event-dot {
+  fill: #f8fafc;
+}
+
+.runtime-graph__event-pulse {
+  fill: transparent;
+  stroke: var(--runtime-cyan);
+  stroke-width: 1;
+  opacity: 0.8;
+  animation: runtime-event-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes runtime-event-pulse {
+  0%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.15);
+  }
+}
+
+.runtime-graph__grad-glow-inner {
+  stop-color: rgba(66, 217, 244, 0.24);
+}
+.runtime-graph__grad-glow-outer {
+  stop-color: rgba(66, 217, 244, 0);
+}
+.runtime-graph__grad-edge-a {
+  stop-color: rgba(66, 217, 244, 0.1);
+}
+.runtime-graph__grad-edge-b {
+  stop-color: rgba(120, 242, 173, 0.9);
+}
+.runtime-graph__grad-edge-c {
+  stop-color: rgba(224, 162, 79, 0.42);
+}
+
+.runtime-graph__edge {
+  stroke: var(--runtime-line-soft);
+  stroke-width: 1.35;
+  opacity: 0.68;
+  transition:
+    stroke 0.9s var(--runtime-ease),
+    opacity 0.9s var(--runtime-ease);
+}
+
+.runtime-graph__edge--done {
+  stroke: rgba(120, 242, 173, 0.42);
+  opacity: 0.82;
+}
+
+.runtime-graph__edge--active {
+  stroke: url(#runtime-edge-hot);
+  stroke-width: 2.4;
+  opacity: 1;
+  filter: drop-shadow(0 0 7px rgba(66, 217, 244, 0.44));
+  animation: runtime-edge-pulse 2.6s ease-in-out infinite;
+}
+
+.runtime-graph__edge--failed {
+  stroke: var(--runtime-red);
+  opacity: 0.95;
+}
+
+@keyframes runtime-edge-pulse {
+  0%,
+  100% {
+    stroke-dasharray: 1 0;
+    opacity: 0.72;
+  }
+  50% {
+    stroke-dasharray: 10 7;
+    opacity: 1;
+  }
+}
+
+.runtime-graph__packet {
+  fill: var(--runtime-cyan);
+  filter: drop-shadow(0 0 7px rgba(66, 217, 244, 0.9));
+}
+
+.runtime-graph__packet--b {
+  fill: var(--runtime-green);
+}
+
+.runtime-graph__node {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.runtime-graph__node-glow {
+  opacity: 0.95;
+  animation: runtime-node-glow 2.8s ease-in-out infinite;
+}
+
+@keyframes runtime-node-glow {
+  0%,
+  100% {
+    opacity: 0.48;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.runtime-graph__node-box {
+  fill: var(--runtime-panel);
+  stroke: rgba(148, 163, 184, 0.24);
+  stroke-width: 1.2;
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.24));
+}
+
+.runtime-graph__node--pending .runtime-graph__node-box {
+  fill: rgba(8, 14, 22, 0.72);
+  stroke: rgba(148, 163, 184, 0.18);
+}
+
+.runtime-graph__node--done .runtime-graph__node-box {
+  fill: rgba(8, 32, 26, 0.88);
+  stroke: rgba(120, 242, 173, 0.48);
+}
+
+.runtime-graph__node--active .runtime-graph__node-box {
+  fill: var(--runtime-panel-active);
+  stroke: rgba(66, 217, 244, 0.9);
+  stroke-width: 1.7;
+  filter: drop-shadow(0 0 18px rgba(66, 217, 244, 0.36));
+}
+
+.runtime-graph__node--failed .runtime-graph__node-box {
+  fill: rgba(55, 17, 25, 0.9);
+  stroke: rgba(255, 122, 138, 0.82);
+}
+
+.runtime-graph__node-rail {
+  fill: var(--runtime-amber);
+}
+
+.runtime-graph__node--agent .runtime-graph__node-rail {
+  fill: var(--runtime-purple);
+}
+.runtime-graph__node--vision .runtime-graph__node-rail {
+  fill: var(--runtime-cyan);
+}
+.runtime-graph__node--ingest .runtime-graph__node-rail {
+  fill: #8a7cff;
+}
+.runtime-graph__node--pool .runtime-graph__node-rail {
+  fill: var(--runtime-green);
+}
+.runtime-graph__node--gate .runtime-graph__node-rail {
+  fill: var(--runtime-red);
+}
+
+.runtime-graph__node-short {
+  fill: var(--runtime-text);
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.runtime-graph__node-label {
+  fill: var(--runtime-muted);
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.runtime-graph__node--pending .runtime-graph__node-short,
+.runtime-graph__node--pending .runtime-graph__node-label {
+  fill: var(--runtime-dim);
+}
+
+.runtime-graph__node-dot {
+  fill: rgba(148, 163, 184, 0.42);
+}
+
+.runtime-graph__node--active .runtime-graph__node-dot {
+  fill: var(--runtime-cyan);
+  filter: drop-shadow(0 0 7px rgba(66, 217, 244, 0.9));
+  animation: runtime-dot 1.35s ease-in-out infinite;
+}
+
+.runtime-graph__node--done .runtime-graph__node-dot {
+  fill: var(--runtime-green);
+}
+
+.runtime-graph__node--failed .runtime-graph__node-dot {
+  fill: var(--runtime-red);
+}
+
+@keyframes runtime-dot {
+  0%,
+  100% {
+    opacity: 0.42;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.runtime-graph__node-signal {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  opacity: 0.42;
+}
+
+.runtime-graph__node--active .runtime-graph__node-signal {
+  stroke: var(--runtime-cyan);
+  opacity: 0.95;
+}
+
+.runtime-graph__node--done .runtime-graph__node-signal {
+  stroke: var(--runtime-green);
+}
+
+.runtime-graph__scanline {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(66, 217, 244, 0.06) 48%,
+    transparent 55%
+  );
+  transform: translateY(-100%);
+  animation: runtime-scan 7s linear infinite;
+}
+
+@keyframes runtime-scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+.runtime-graph__ambient {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+
+.runtime-graph__ambient--live {
+  background:
+    radial-gradient(ellipse 55% 45% at 52% 50%, rgba(66, 217, 244, 0.08), transparent 68%),
+    linear-gradient(90deg, rgba(66, 217, 244, 0.04), transparent 35%, rgba(120, 242, 173, 0.04));
+  animation: runtime-ambient 4.8s ease-in-out infinite alternate;
+}
+
+.runtime-graph__ambient--idle {
+  background: linear-gradient(90deg, rgba(66, 217, 244, 0.025), transparent 55%);
+}
+
+@keyframes runtime-ambient {
+  from {
+    opacity: 0.48;
+  }
+  to {
+    opacity: 0.86;
+  }
+}
+
+.runtime-graph__foot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.runtime-graph__footnote {
+  margin: 0;
+  max-width: 42rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.runtime-graph__active-node {
+  flex-shrink: 0;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid rgba(66, 217, 244, 0.22);
+  border-radius: 999px;
+  color: var(--runtime-cyan);
+  background: rgba(66, 217, 244, 0.06);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+@media (max-width: 820px) {
+  .runtime-graph__header,
+  .runtime-graph__foot {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .runtime-graph__svg {
+    width: 100%;
+  }
+}
+
+/* ── 实时运行图谱 · 审计地铁图（替换旧节点盒子结构） ── */
+.runtime-graph {
+  --runtime-surface: rgba(250, 248, 244, 0.94);
+  --runtime-surface-2: rgba(244, 241, 236, 0.82);
+  --runtime-ink: #1f1b18;
+  --runtime-muted: rgba(31, 27, 24, 0.56);
+  --runtime-dim: rgba(31, 27, 24, 0.36);
+  --runtime-hairline: rgba(31, 27, 24, 0.1);
+  --runtime-hairline-strong: rgba(31, 27, 24, 0.18);
+  --runtime-teal: #2f9296;
+  --runtime-green: #5a8d64;
+  --runtime-amber: #a76528;
+  --runtime-red: #ad545c;
+  --runtime-violet: #6d62a8;
+  --runtime-service: #6f7478;
+  color: var(--runtime-ink);
+}
+
+[data-theme="dark"] .runtime-graph {
+  --runtime-surface: rgba(18, 16, 14, 0.94);
+  --runtime-surface-2: rgba(24, 21, 18, 0.78);
+  --runtime-ink: #f5f0eb;
+  --runtime-muted: rgba(245, 240, 235, 0.58);
+  --runtime-dim: rgba(245, 240, 235, 0.34);
+  --runtime-hairline: rgba(245, 240, 235, 0.1);
+  --runtime-hairline-strong: rgba(245, 240, 235, 0.18);
+  --runtime-teal: #65bfc2;
+  --runtime-green: #84aa84;
+  --runtime-amber: #c48644;
+  --runtime-red: #c66e76;
+  --runtime-violet: #9a8fe0;
+  --runtime-service: #a3a3a3;
+}
+
+.runtime-graph__canvas {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--runtime-hairline);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, var(--runtime-surface), var(--runtime-surface-2)), var(--cyber-panel);
+  box-shadow: none;
+}
+
+.runtime-graph__svg {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  aspect-ratio: 920 / 720;
+  color: var(--runtime-ink);
+}
+
+.runtime-graph--embedded .runtime-graph__svg,
+.run-stage__graph .runtime-graph__svg {
+  height: auto;
+  aspect-ratio: 920 / 720;
+}
+
+.runtime-graph__surface {
+  fill: var(--runtime-surface);
+  stroke: var(--runtime-hairline);
+  stroke-width: 1;
+}
+
+.runtime-graph__stage-line {
+  stroke: var(--runtime-hairline);
+  stroke-width: 1;
+  stroke-dasharray: 4 12;
+}
+
+.runtime-graph__stage-label {
+  fill: var(--runtime-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.runtime-graph__line-labels text {
+  fill: var(--runtime-dim);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.runtime-graph__grad-done-a {
+  stop-color: rgba(90, 141, 100, 0.28);
+}
+.runtime-graph__grad-done-b {
+  stop-color: rgba(47, 146, 150, 0.36);
+}
+.runtime-graph__grad-active-a {
+  stop-color: rgba(47, 146, 150, 0.22);
+}
+.runtime-graph__grad-active-b {
+  stop-color: rgba(47, 146, 150, 0.9);
+}
+.runtime-graph__grad-active-c {
+  stop-color: rgba(167, 101, 40, 0.5);
+}
+
+.runtime-graph__rail-path {
+  stroke: var(--runtime-hairline-strong);
+  stroke-width: 4;
+  stroke-linecap: round;
+  opacity: 0.7;
+}
+
+.runtime-graph__rail--parse .runtime-graph__rail-path {
+  stroke: rgba(47, 146, 150, 0.26);
+}
+
+.runtime-graph__rail--audit .runtime-graph__rail-path {
+  stroke: rgba(109, 98, 168, 0.24);
+}
+
+.runtime-graph__rail--delivery .runtime-graph__rail-path {
+  stroke: rgba(167, 101, 40, 0.28);
+}
+
+.runtime-graph__rail--service .runtime-graph__rail-path {
+  stroke: rgba(111, 116, 120, 0.22);
+  stroke-width: 3;
+  stroke-dasharray: 8 10;
+}
+
+.runtime-graph__rail--done .runtime-graph__rail-path {
+  stroke: url(#runtime-flow-done);
+  opacity: 0.95;
+}
+
+.runtime-graph__rail--active .runtime-graph__rail-path {
+  stroke: url(#runtime-flow-active);
+  stroke-width: 5;
+  opacity: 1;
+  filter: drop-shadow(0 0 5px rgba(47, 146, 150, 0.22));
+}
+
+.runtime-graph__rail--failed .runtime-graph__rail-path {
+  stroke: var(--runtime-red);
+  opacity: 0.95;
+}
+
+.runtime-graph__rail-packet {
+  fill: var(--runtime-teal);
+  filter: drop-shadow(0 0 8px rgba(47, 146, 150, 0.6));
+}
+
+.runtime-graph__station {
+  color: var(--runtime-muted);
+}
+
+.runtime-graph__station-halo {
+  fill: var(--runtime-surface);
+  stroke: var(--runtime-hairline-strong);
+  stroke-width: 1;
+}
+
+.runtime-graph__station-core {
+  fill: var(--runtime-surface);
+  stroke: var(--runtime-dim);
+  stroke-width: 2;
+}
+
+.runtime-graph__station-dot {
+  fill: var(--runtime-dim);
+}
+
+.runtime-graph__station-label {
+  fill: var(--runtime-ink);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.runtime-graph__station-meta {
+  fill: var(--runtime-muted);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.runtime-graph__station--pending .runtime-graph__station-label,
+.runtime-graph__station--pending .runtime-graph__station-meta {
+  fill: var(--runtime-dim);
+}
+
+.runtime-graph__station--pending .runtime-graph__station-core {
+  stroke: var(--runtime-hairline-strong);
+}
+
+.runtime-graph__station--done .runtime-graph__station-core {
+  stroke: var(--runtime-green);
+}
+
+.runtime-graph__station--done .runtime-graph__station-dot {
+  fill: var(--runtime-green);
+}
+
+.runtime-graph__station--active .runtime-graph__station-core {
+  stroke: var(--runtime-teal);
+  stroke-width: 3;
+}
+
+.runtime-graph__station--active .runtime-graph__station-dot {
+  fill: var(--runtime-teal);
+}
+
+.runtime-graph__station--failed .runtime-graph__station-core,
+.runtime-graph__station--failed .runtime-graph__station-dot {
+  stroke: var(--runtime-red);
+  fill: var(--runtime-red);
+}
+
+.runtime-graph__station--vision .runtime-graph__station-core {
+  stroke: var(--runtime-teal);
+}
+.runtime-graph__station--pool .runtime-graph__station-core {
+  stroke: var(--runtime-green);
+}
+.runtime-graph__station--agent .runtime-graph__station-core {
+  stroke: var(--runtime-violet);
+}
+.runtime-graph__station--gate .runtime-graph__station-core {
+  stroke: var(--runtime-amber);
+}
+.runtime-graph__station--service .runtime-graph__station-core {
+  stroke: var(--runtime-service);
+  stroke-width: 1.5;
+}
+
+.runtime-graph__station-pulse {
+  fill: transparent;
+  stroke: var(--runtime-teal);
+  stroke-width: 1.5;
+  opacity: 0.72;
+  animation: runtime-station-pulse 1.9s ease-in-out infinite;
+}
+
+@keyframes runtime-station-pulse {
+  0%,
+  100% {
+    opacity: 0.1;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 0.68;
+    transform: scale(1.08);
+  }
+}
+
+.runtime-graph__inspector-box {
+  fill: rgba(255, 255, 255, 0.32);
+  stroke: var(--runtime-hairline);
+  stroke-width: 1;
+}
+
+[data-theme="dark"] .runtime-graph__inspector-box {
+  fill: rgba(0, 0, 0, 0.12);
+}
+
+.runtime-graph__inspector-kicker {
+  fill: var(--runtime-dim);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.runtime-graph__inspector-title {
+  fill: var(--runtime-ink);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.runtime-graph__inspector-body,
+.runtime-graph__inspector-stat {
+  fill: var(--runtime-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.runtime-graph__inspector-stat {
+  text-anchor: start;
+  font-family: var(--mono);
+}
+
+.runtime-graph__inspector-stat--risk {
+  fill: var(--runtime-red);
+}
+
+.runtime-graph__trace-box {
+  fill: rgba(255, 255, 255, 0.22);
+  stroke: var(--runtime-hairline);
+  stroke-width: 1;
+}
+
+[data-theme="dark"] .runtime-graph__trace-box {
+  fill: rgba(255, 255, 255, 0.025);
+}
+
+.runtime-graph__trace-title {
+  fill: var(--runtime-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.runtime-graph__trace-lane-label {
+  fill: var(--runtime-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.runtime-graph__trace-lane {
+  stroke: var(--runtime-hairline);
+  stroke-width: 1;
+}
+
+.runtime-graph__trace-tick {
+  stroke: var(--runtime-dim);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.runtime-graph__trace-event--done .runtime-graph__trace-tick {
+  stroke: var(--runtime-green);
+}
+
+.runtime-graph__trace-event--active .runtime-graph__trace-tick {
+  stroke: var(--runtime-teal);
+  stroke-width: 3;
+}
+
+.runtime-graph__trace-event--failed .runtime-graph__trace-tick {
+  stroke: var(--runtime-red);
+  stroke-width: 3;
+}
+
+.runtime-graph__trace-event--tool .runtime-graph__trace-tick {
+  stroke: var(--runtime-amber);
+}
+
+.runtime-graph__trace-event--memory .runtime-graph__trace-tick {
+  stroke: var(--runtime-violet);
+}
+
+.runtime-graph__trace-event--runtime .runtime-graph__trace-tick,
+.runtime-graph__trace-event--harness .runtime-graph__trace-tick {
+  stroke: var(--runtime-service);
+}
+
+.runtime-graph__trace-pulse {
+  fill: transparent;
+  stroke: var(--runtime-teal);
+  stroke-width: 1;
+  opacity: 0.7;
+  animation: runtime-event-pulse 1.6s ease-in-out infinite;
+}
+
+.runtime-graph__foot {
+  margin-top: 0.85rem;
+}
+
+.runtime-graph__active-node {
+  border-color: var(--runtime-hairline-strong);
+  color: var(--runtime-ink);
+  background: transparent;
+}
+
+/* ── Runtime Topology v2 · 节点卡片 + 事件映射 ── */
+.runtime-graph {
+  --runtime-surface: #11100d;
+  --runtime-surface-2: #17130f;
+  --runtime-panel: rgba(28, 24, 19, 0.92);
+  --runtime-panel-2: rgba(19, 17, 14, 0.96);
+  --runtime-ink: #f8f2e8;
+  --runtime-muted: rgba(248, 242, 232, 0.66);
+  --runtime-dim: rgba(248, 242, 232, 0.38);
+  --runtime-hairline: rgba(248, 242, 232, 0.1);
+  --runtime-hairline-strong: rgba(248, 242, 232, 0.2);
+  --runtime-teal: #45c0b7;
+  --runtime-green: #8fbf74;
+  --runtime-amber: #cf8d40;
+  --runtime-red: #d96b72;
+  --runtime-violet: #a998ef;
+  --runtime-service: #a7a29a;
+}
+
+.runtime-graph__canvas {
+  border-color: rgba(31, 27, 24, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #18130f 0%, #0f0d0a 100%), #11100d;
+  box-shadow:
+    0 20px 60px rgba(20, 14, 9, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.runtime-graph__svg {
+  min-width: 100%;
+  height: auto;
+  aspect-ratio: 1200 / 760;
+}
+
+.runtime-graph--embedded .runtime-graph__svg,
+.run-stage__graph .runtime-graph__svg {
+  height: auto;
+  aspect-ratio: 1200 / 760;
+}
+
+.runtime-graph__surface {
+  fill: var(--runtime-surface);
+  stroke: rgba(248, 242, 232, 0.12);
+}
+
+.runtime-graph__mesh {
+  fill: url(#runtime-mesh);
+  stroke: rgba(248, 242, 232, 0.06);
+  stroke-width: 1;
+  opacity: 0.82;
+}
+
+.runtime-graph__mesh-path {
+  stroke: rgba(248, 242, 232, 0.055);
+  stroke-width: 1;
+}
+
+.runtime-graph__track-band {
+  fill: rgba(255, 255, 255, 0.025);
+  stroke: rgba(248, 242, 232, 0.075);
+  stroke-width: 1;
+}
+
+.runtime-graph__track--ingest .runtime-graph__track-band {
+  fill: rgba(69, 192, 183, 0.055);
+}
+
+.runtime-graph__track--core .runtime-graph__track-band {
+  fill: rgba(143, 191, 116, 0.05);
+}
+
+.runtime-graph__track--audit .runtime-graph__track-band {
+  fill: rgba(207, 141, 64, 0.055);
+}
+
+.runtime-graph__track--service .runtime-graph__track-band {
+  fill: rgba(167, 162, 154, 0.045);
+}
+
+.runtime-graph__core-field {
+  pointer-events: none;
+}
+
+.runtime-graph__core-ring {
+  fill: transparent;
+  stroke-width: 1;
+}
+
+.runtime-graph__core-ring--outer {
+  stroke: rgba(143, 191, 116, 0.22);
+  stroke-dasharray: 3 9;
+}
+
+.runtime-graph__core-ring--inner {
+  stroke: rgba(69, 192, 183, 0.28);
+  stroke-dasharray: 12 8;
+}
+
+.runtime-graph--live .runtime-graph__core-ring--inner {
+  animation: runtime-core-rotate 12s linear infinite;
+  transform-origin: center;
+}
+
+.runtime-graph__core-scan {
+  fill: rgba(69, 192, 183, 0.02);
+  stroke: rgba(69, 192, 183, 0.34);
+  stroke-width: 1.5;
+  opacity: 0.72;
+  animation: runtime-core-scan 2.8s ease-in-out infinite;
+}
+
+.runtime-graph__core-caption {
+  fill: rgba(248, 242, 232, 0.34);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+@keyframes runtime-core-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes runtime-core-scan {
+  0%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.84);
+  }
+  50% {
+    opacity: 0.64;
+    transform: scale(1.05);
+  }
+}
+
+.runtime-graph__track-label {
+  fill: rgba(248, 242, 232, 0.44);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.runtime-graph__stage-line {
+  stroke: rgba(248, 242, 232, 0.1);
+  stroke-dasharray: 3 12;
+}
+
+.runtime-graph__stage-label {
+  fill: rgba(248, 242, 232, 0.42);
+  letter-spacing: 0;
+}
+
+.runtime-graph__grad-done-a {
+  stop-color: rgba(143, 191, 116, 0.68);
+}
+.runtime-graph__grad-done-b {
+  stop-color: rgba(69, 192, 183, 0.56);
+}
+.runtime-graph__grad-active-a {
+  stop-color: rgba(69, 192, 183, 0.1);
+}
+.runtime-graph__grad-active-b {
+  stop-color: rgba(69, 192, 183, 0.96);
+}
+.runtime-graph__grad-active-c {
+  stop-color: rgba(207, 141, 64, 0.72);
+}
+
+.runtime-graph__rail-path {
+  stroke: rgba(248, 242, 232, 0.14);
+  stroke-width: 3.5;
+  opacity: 0.76;
+}
+
+.runtime-graph__rail--parse .runtime-graph__rail-path {
+  stroke: rgba(69, 192, 183, 0.36);
+}
+
+.runtime-graph__rail--audit .runtime-graph__rail-path {
+  stroke: rgba(207, 141, 64, 0.34);
+}
+
+.runtime-graph__rail--delivery .runtime-graph__rail-path {
+  stroke: rgba(143, 191, 116, 0.34);
+}
+
+.runtime-graph__rail--service .runtime-graph__rail-path {
+  stroke: rgba(167, 162, 154, 0.28);
+  stroke-width: 2.5;
+}
+
+.runtime-graph__rail--done .runtime-graph__rail-path,
+.runtime-graph__rail--active .runtime-graph__rail-path {
+  filter: drop-shadow(0 0 8px rgba(69, 192, 183, 0.26));
+}
+
+.runtime-graph__rail--active .runtime-graph__rail-path {
+  stroke-width: 5;
+}
+
+.runtime-graph__rail-packet {
+  fill: var(--runtime-teal);
+  filter: drop-shadow(0 0 10px rgba(69, 192, 183, 0.82));
+}
+
+.runtime-graph__station-glow {
+  fill: rgba(69, 192, 183, 0.08);
+  opacity: 0;
+}
+
+.runtime-graph__station-card {
+  fill: var(--runtime-panel);
+  stroke: rgba(248, 242, 232, 0.14);
+  stroke-width: 1;
+  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.24))
+    drop-shadow(0 0 10px rgba(69, 192, 183, 0.08));
+}
+
+.runtime-graph__station-rail {
+  fill: var(--runtime-dim);
+}
+
+.runtime-graph__station-led {
+  fill: var(--runtime-dim);
+  stroke: rgba(248, 242, 232, 0.24);
+  stroke-width: 2;
+}
+
+.runtime-graph__station-label {
+  fill: var(--runtime-ink);
+  font-size: 13px;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.runtime-graph__station-meta {
+  fill: var(--runtime-muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.runtime-graph__station-status {
+  fill: rgba(248, 242, 232, 0.42);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.runtime-graph__station--pending .runtime-graph__station-card {
+  fill: rgba(24, 22, 18, 0.78);
+  stroke: rgba(248, 242, 232, 0.08);
+  filter: none;
+}
+
+.runtime-graph__station--pending .runtime-graph__station-label,
+.runtime-graph__station--pending .runtime-graph__station-meta,
+.runtime-graph__station--pending .runtime-graph__station-status {
+  fill: rgba(248, 242, 232, 0.34);
+}
+
+.runtime-graph__station--done .runtime-graph__station-rail,
+.runtime-graph__station--done .runtime-graph__station-led {
+  fill: var(--runtime-green);
+}
+
+.runtime-graph__station--active .runtime-graph__station-glow {
+  opacity: 1;
+}
+
+.runtime-graph__station--active .runtime-graph__station-card {
+  stroke: rgba(69, 192, 183, 0.86);
+  filter: drop-shadow(0 14px 34px rgba(0, 0, 0, 0.34)) drop-shadow(0 0 18px rgba(69, 192, 183, 0.4));
+}
+
+.runtime-graph__station--active .runtime-graph__station-rail,
+.runtime-graph__station--active .runtime-graph__station-led {
+  fill: var(--runtime-teal);
+}
+
+.runtime-graph__station--failed .runtime-graph__station-card {
+  stroke: rgba(217, 107, 114, 0.86);
+}
+
+.runtime-graph__station--failed .runtime-graph__station-rail,
+.runtime-graph__station--failed .runtime-graph__station-led {
+  fill: var(--runtime-red);
+}
+
+.runtime-graph__station--vision .runtime-graph__station-rail,
+.runtime-graph__station--vision .runtime-graph__station-led {
+  fill: var(--runtime-teal);
+}
+
+.runtime-graph__station--pool .runtime-graph__station-rail,
+.runtime-graph__station--pool .runtime-graph__station-led {
+  fill: var(--runtime-green);
+}
+
+.runtime-graph__station--agent .runtime-graph__station-rail,
+.runtime-graph__station--agent .runtime-graph__station-led {
+  fill: var(--runtime-violet);
+}
+
+.runtime-graph__station--gate .runtime-graph__station-rail,
+.runtime-graph__station--gate .runtime-graph__station-led {
+  fill: var(--runtime-amber);
+}
+
+.runtime-graph__station--service .runtime-graph__station-card {
+  fill: rgba(20, 18, 15, 0.74);
+  stroke: rgba(167, 162, 154, 0.2);
+}
+
+.runtime-graph__station--service .runtime-graph__station-rail,
+.runtime-graph__station--service .runtime-graph__station-led {
+  fill: var(--runtime-service);
+}
+
+.runtime-graph__station-badge rect {
+  fill: rgba(248, 242, 232, 0.9);
+  stroke: rgba(0, 0, 0, 0.16);
+}
+
+.runtime-graph__station-badge text {
+  fill: #17130f;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.runtime-graph__station-pulse {
+  fill: transparent;
+  stroke: rgba(69, 192, 183, 0.74);
+  stroke-width: 1.5;
+  opacity: 0.78;
+  animation: runtime-station-pulse 1.9s ease-in-out infinite;
+}
+
+.runtime-graph__inspector-box {
+  fill: rgba(18, 16, 13, 0.88);
+  stroke: rgba(248, 242, 232, 0.14);
+}
+
+.runtime-graph__inspector-kicker,
+.runtime-graph__inspector-body,
+.runtime-graph__inspector-stat {
+  letter-spacing: 0;
+}
+
+.runtime-graph__inspector-title {
+  letter-spacing: 0;
+}
+
+.runtime-graph__trace-box {
+  fill: rgba(14, 13, 11, 0.9);
+  stroke: rgba(248, 242, 232, 0.12);
+}
+
+.runtime-graph__trace-title,
+.runtime-graph__trace-lane-label {
+  letter-spacing: 0;
+}
+
+.runtime-graph__trace-lane {
+  stroke: rgba(248, 242, 232, 0.09);
+}
+
+.runtime-graph__trace-tick {
+  stroke: rgba(248, 242, 232, 0.34);
+  stroke-width: 2.5;
+}
+
+.runtime-graph__trace-event--done .runtime-graph__trace-tick {
+  stroke: var(--runtime-green);
+}
+
+.runtime-graph__trace-event--active .runtime-graph__trace-tick,
+.runtime-graph__trace-event--vision_agent .runtime-graph__trace-tick {
+  stroke: var(--runtime-teal);
+}
+
+.runtime-graph__trace-event--failed .runtime-graph__trace-tick,
+.runtime-graph__trace-event--critic .runtime-graph__trace-tick {
+  stroke: var(--runtime-red);
+}
+
+.runtime-graph__trace-event--tool .runtime-graph__trace-tick {
+  stroke: var(--runtime-amber);
+}
+
+.runtime-graph__trace-event--memory .runtime-graph__trace-tick,
+.runtime-graph__trace-event--sub_agent .runtime-graph__trace-tick {
+  stroke: var(--runtime-violet);
+}
+
+/* Runtime graph v3 · knowledge-graph entity nodes */
+.runtime-graph__station-card {
+  fill: transparent;
+  stroke: transparent;
+  filter: none;
+  pointer-events: all;
+}
+
+.runtime-graph__station-glow {
+  fill: rgba(69, 192, 183, 0.08);
+  opacity: 0.28;
+}
+
+.runtime-graph__station-orb {
+  fill: rgba(18, 16, 13, 0.96);
+  stroke: rgba(248, 242, 232, 0.18);
+  stroke-width: 1.4;
+  filter: drop-shadow(0 9px 18px rgba(0, 0, 0, 0.38)) drop-shadow(0 0 14px rgba(69, 192, 183, 0.2));
+}
+
+.runtime-graph__station-core {
+  fill: var(--runtime-dim);
+  stroke: rgba(248, 242, 232, 0.24);
+  stroke-width: 1.8;
+}
+
+.runtime-graph__station-short {
+  fill: #12100e;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
+.runtime-graph__station-label-chip {
+  fill: rgba(17, 15, 12, 0.72);
+  stroke: rgba(248, 242, 232, 0.12);
+  stroke-width: 1;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.24));
+}
+
+.runtime-graph__station--pending .runtime-graph__station-orb,
+.runtime-graph__station--pending .runtime-graph__station-label-chip {
+  opacity: 0.62;
+}
+
+.runtime-graph__station--done .runtime-graph__station-core {
+  fill: var(--runtime-green);
+}
+
+.runtime-graph__station--active .runtime-graph__station-orb {
+  stroke: rgba(69, 192, 183, 0.86);
+  filter: drop-shadow(0 14px 34px rgba(0, 0, 0, 0.34))
+    drop-shadow(0 0 18px rgba(69, 192, 183, 0.42));
+}
+
+.runtime-graph__station--active .runtime-graph__station-core,
+.runtime-graph__station--vision .runtime-graph__station-core {
+  fill: var(--runtime-teal);
+}
+
+.runtime-graph__station--failed .runtime-graph__station-orb {
+  stroke: rgba(217, 107, 114, 0.86);
+}
+
+.runtime-graph__station--failed .runtime-graph__station-core {
+  fill: var(--runtime-red);
+}
+
+.runtime-graph__station--pool .runtime-graph__station-core {
+  fill: var(--runtime-green);
+}
+
+.runtime-graph__station--agent .runtime-graph__station-core {
+  fill: var(--runtime-violet);
+}
+
+.runtime-graph__station--gate .runtime-graph__station-core {
+  fill: var(--runtime-amber);
+}
+
+.runtime-graph__station--service .runtime-graph__station-core {
+  fill: var(--runtime-service);
+}
+
+.runtime-graph__station--service .runtime-graph__station-label-chip {
+  fill: rgba(20, 18, 15, 0.62);
+}
+
+.runtime-graph__rail-packet--done {
+  fill: rgba(143, 191, 116, 0.9);
+  filter: drop-shadow(0 0 8px rgba(143, 191, 116, 0.45));
+}
+
+.runtime-graph__rail-packet--active {
+  fill: var(--runtime-teal);
+  filter: drop-shadow(0 0 12px rgba(69, 192, 183, 0.84));
+}
+
+/* Runtime graph v4 · knowledge-network surface */
+.runtime-graph {
+  --runtime-surface: #0d1117;
+  --runtime-surface-2: #111722;
+  --runtime-panel: rgba(13, 17, 23, 0.84);
+  --runtime-ink: #f2f7fb;
+  --runtime-muted: rgba(226, 236, 245, 0.68);
+  --runtime-dim: rgba(226, 236, 245, 0.4);
+  --runtime-hairline: rgba(226, 236, 245, 0.1);
+  --runtime-hairline-strong: rgba(226, 236, 245, 0.2);
+  --runtime-teal: #49d7cf;
+  --runtime-green: #8bd67f;
+  --runtime-amber: #d59a4a;
+  --runtime-red: #e06f7a;
+  --runtime-violet: #9f8cff;
+  --runtime-service: #a8b2bd;
+}
+
+.runtime-graph__canvas {
+  border-color: rgba(226, 236, 245, 0.12);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(15, 20, 28, 0.96), rgba(8, 10, 14, 0.98)), var(--runtime-surface);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 24px 70px rgba(0, 0, 0, 0.24);
+}
+
+.runtime-graph__surface {
+  fill: #0b0f15;
+  stroke: rgba(226, 236, 245, 0.1);
+}
+
+.runtime-graph__mesh {
+  fill: url(#runtime-mesh);
+  stroke: rgba(226, 236, 245, 0.055);
+  opacity: 0.54;
+}
+
+.runtime-graph__mesh-path {
+  stroke: rgba(226, 236, 245, 0.045);
+}
+
+.runtime-graph__track-band {
+  fill: rgba(255, 255, 255, 0.022);
+  stroke: rgba(226, 236, 245, 0.08);
+  stroke-dasharray: 1 0;
+}
+
+.runtime-graph__track--ingest .runtime-graph__track-band {
+  fill: rgba(73, 215, 207, 0.045);
+}
+
+.runtime-graph__track--core .runtime-graph__track-band {
+  fill: rgba(139, 214, 127, 0.045);
+}
+
+.runtime-graph__track--audit .runtime-graph__track-band {
+  fill: rgba(213, 154, 74, 0.048);
+}
+
+.runtime-graph__track--service .runtime-graph__track-band {
+  fill: rgba(168, 178, 189, 0.04);
+}
+
+.runtime-graph__track-label {
+  fill: rgba(226, 236, 245, 0.5);
+  font-size: 11px;
+}
+
+.runtime-graph__core-ring--outer {
+  stroke: rgba(139, 214, 127, 0.2);
+  stroke-dasharray: 2 10;
+  animation: runtime-core-rotate 24s linear infinite;
+  transform-origin: center;
+}
+
+.runtime-graph__core-ring--inner {
+  stroke: rgba(73, 215, 207, 0.34);
+  stroke-dasharray: 14 9;
+  animation: runtime-core-rotate 15s linear infinite reverse;
+  transform-origin: center;
+}
+
+.runtime-graph__core-caption {
+  fill: rgba(226, 236, 245, 0.42);
+  font-size: 10px;
+}
+
+.runtime-graph__rail-path {
+  stroke: rgba(226, 236, 245, 0.18);
+  stroke-width: 2.4;
+  opacity: 0.72;
+}
+
+.runtime-graph__rail--parse .runtime-graph__rail-path {
+  stroke: rgba(73, 215, 207, 0.38);
+}
+
+.runtime-graph__rail--audit .runtime-graph__rail-path {
+  stroke: rgba(159, 140, 255, 0.35);
+}
+
+.runtime-graph__rail--delivery .runtime-graph__rail-path {
+  stroke: rgba(213, 154, 74, 0.42);
+}
+
+.runtime-graph__rail--done .runtime-graph__rail-path {
+  stroke: url(#runtime-flow-done);
+  filter: drop-shadow(0 0 7px rgba(73, 215, 207, 0.16));
+}
+
+.runtime-graph__rail--active .runtime-graph__rail-path {
+  stroke: url(#runtime-flow-active);
+  stroke-width: 3.6;
+  filter: drop-shadow(0 0 11px rgba(73, 215, 207, 0.38));
+}
+
+.runtime-graph__station-card {
+  fill: transparent;
+  stroke: transparent;
+}
+
+.runtime-graph__station-glow {
+  fill: rgba(73, 215, 207, 0.1);
+  opacity: 0.32;
+  filter: blur(2px);
+}
+
+.runtime-graph__station-orb {
+  fill: rgba(10, 14, 20, 0.98);
+  stroke: rgba(226, 236, 245, 0.24);
+  stroke-width: 1.4;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 13px rgba(73, 215, 207, 0.18));
+}
+
+.runtime-graph__station-core {
+  fill: rgba(226, 236, 245, 0.4);
+  stroke: rgba(255, 255, 255, 0.32);
+}
+
+.runtime-graph__station-short {
+  fill: #0b0f15;
+  font-size: 8px;
+  font-weight: 950;
+}
+
+.runtime-graph__station-label-chip {
+  fill: rgba(10, 14, 20, 0.78);
+  stroke: rgba(226, 236, 245, 0.14);
+}
+
+.runtime-graph__station-label {
+  fill: var(--runtime-ink);
+  font-size: 12.5px;
+  font-weight: 850;
+}
+
+.runtime-graph__station-meta {
+  fill: var(--runtime-muted);
+  font-size: 10px;
+}
+
+.runtime-graph__station-status {
+  fill: rgba(226, 236, 245, 0.42);
+  font-size: 8.5px;
+}
+
+.runtime-graph__station--done .runtime-graph__station-orb {
+  stroke: rgba(139, 214, 127, 0.44);
+}
+
+.runtime-graph__station--active .runtime-graph__station-orb {
+  stroke: rgba(73, 215, 207, 0.9);
+}
+
+.runtime-graph__station--active .runtime-graph__station-glow {
+  opacity: 0.78;
+}
+
+.runtime-graph__inspector-box {
+  fill: rgba(10, 14, 20, 0.76);
+  stroke: rgba(226, 236, 245, 0.14);
+}
+
+.runtime-graph__trace-box {
+  fill: rgba(7, 10, 14, 0.82);
+  stroke: rgba(226, 236, 245, 0.11);
+}
+
+/* Runtime graph v5 · dynamic knowledge-network */
+.runtime-graph {
+  --runtime-surface: #0d1117;
+  --runtime-surface-2: #111722;
+  --runtime-panel: rgba(9, 13, 20, 0.88);
+  --runtime-ink: #f2f7fb;
+  --runtime-muted: rgba(226, 236, 245, 0.7);
+  --runtime-dim: rgba(226, 236, 245, 0.42);
+  --runtime-hairline: rgba(226, 236, 245, 0.1);
+  --runtime-hairline-strong: rgba(226, 236, 245, 0.2);
+  --runtime-teal: #49d7cf;
+  --runtime-green: #8bd67f;
+  --runtime-amber: #d59a4a;
+  --runtime-red: #e06f7a;
+  --runtime-violet: #9f8cff;
+  --runtime-service: #a8b2bd;
+}
+
+.runtime-graph__canvas {
+  overflow-x: auto;
+  border-color: rgba(226, 236, 245, 0.12);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 50% 46%, rgba(73, 215, 207, 0.1), transparent 34%),
+    linear-gradient(180deg, rgba(15, 20, 28, 0.96), rgba(8, 10, 14, 0.98)),
+    var(--runtime-surface);
+}
+
+.runtime-graph__svg {
+  min-width: 920px;
+}
+
+.runtime-graph__surface {
+  fill: #0a0f16;
+  stroke: rgba(226, 236, 245, 0.1);
+}
+
+.runtime-graph__mesh {
+  fill: url(#runtime-mesh);
+  stroke: rgba(226, 236, 245, 0.05);
+  opacity: 0.5;
+}
+
+.runtime-graph__track-band {
+  fill: transparent;
+  stroke: rgba(226, 236, 245, 0.08);
+  stroke-dasharray: 6 10;
+}
+
+.runtime-graph__track-label {
+  fill: rgba(226, 236, 245, 0.48);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.runtime-graph__rail-path {
+  stroke: rgba(226, 236, 245, 0.2);
+  stroke-width: 1.8;
+  opacity: 0.72;
+}
+
+.runtime-graph__rail--parse .runtime-graph__rail-path {
+  stroke: rgba(73, 215, 207, 0.42);
+}
+
+.runtime-graph__rail--audit .runtime-graph__rail-path {
+  stroke: rgba(159, 140, 255, 0.38);
+}
+
+.runtime-graph__rail--delivery .runtime-graph__rail-path {
+  stroke: rgba(213, 154, 74, 0.42);
+}
+
+.runtime-graph__rail--service .runtime-graph__rail-path {
+  stroke: rgba(168, 178, 189, 0.24);
+  stroke-dasharray: 6 8;
+}
+
+.runtime-graph__rail--done .runtime-graph__rail-path {
+  stroke: url(#runtime-flow-done);
+  filter: drop-shadow(0 0 6px rgba(73, 215, 207, 0.14));
+}
+
+.runtime-graph__rail--active .runtime-graph__rail-path {
+  stroke: url(#runtime-flow-active);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 10px rgba(73, 215, 207, 0.34));
+}
+
+.runtime-graph__event-link {
+  stroke: rgba(226, 236, 245, 0.08);
+  stroke-width: 1;
+  stroke-dasharray: 2 8;
+}
+
+.runtime-graph__event-link--active {
+  stroke: rgba(73, 215, 207, 0.34);
+  animation: runtime-event-link 1.8s ease-in-out infinite;
+}
+
+.runtime-graph__event-link--failed {
+  stroke: rgba(224, 111, 122, 0.4);
+}
+
+.runtime-graph__station-card {
+  fill: rgba(10, 15, 22, 0.96);
+  stroke: rgba(226, 236, 245, 0.24);
+  stroke-width: 1.4;
+  filter:
+    drop-shadow(0 9px 18px rgba(0, 0, 0, 0.38))
+    drop-shadow(0 0 14px rgba(73, 215, 207, 0.15));
+}
+
+.runtime-graph__station-glow {
+  fill: rgba(73, 215, 207, 0.09);
+  opacity: 0.38;
+  filter: blur(3px);
+}
+
+.runtime-graph__station-orb {
+  fill: rgba(226, 236, 245, 0.07);
+  stroke: rgba(226, 236, 245, 0.2);
+}
+
+.runtime-graph__station-core {
+  fill: rgba(226, 236, 245, 0.44);
+  stroke: rgba(255, 255, 255, 0.26);
+}
+
+.runtime-graph__station-short {
+  fill: #0a0f16;
+  font-size: 7.5px;
+  font-weight: 950;
+  pointer-events: none;
+}
+
+.runtime-graph__station-label-chip {
+  fill: rgba(8, 12, 18, 0.74);
+  stroke: rgba(226, 236, 245, 0.12);
+}
+
+.runtime-graph__station-label {
+  fill: var(--runtime-ink);
+  font-size: 11.5px;
+  font-weight: 850;
+}
+
+.runtime-graph__station-meta {
+  fill: var(--runtime-muted);
+  font-size: 9.5px;
+  font-weight: 650;
+}
+
+.runtime-graph__station--pending .runtime-graph__station-card,
+.runtime-graph__station--pending .runtime-graph__station-label-chip {
+  opacity: 0.56;
+}
+
+.runtime-graph__station--done .runtime-graph__station-card {
+  stroke: rgba(139, 214, 127, 0.46);
+}
+
+.runtime-graph__station--done .runtime-graph__station-core {
+  fill: var(--runtime-green);
+}
+
+.runtime-graph__station--active .runtime-graph__station-card {
+  stroke: rgba(73, 215, 207, 0.92);
+  filter:
+    drop-shadow(0 14px 28px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 20px rgba(73, 215, 207, 0.45));
+}
+
+.runtime-graph__station--active .runtime-graph__station-glow {
+  opacity: 0.88;
+}
+
+.runtime-graph__station--active .runtime-graph__station-core,
+.runtime-graph__station--vision .runtime-graph__station-core {
+  fill: var(--runtime-teal);
+}
+
+.runtime-graph__station--failed .runtime-graph__station-card {
+  stroke: rgba(224, 111, 122, 0.88);
+}
+
+.runtime-graph__station--failed .runtime-graph__station-core {
+  fill: var(--runtime-red);
+}
+
+.runtime-graph__station--pool .runtime-graph__station-core {
+  fill: var(--runtime-green);
+}
+
+.runtime-graph__station--agent .runtime-graph__station-core {
+  fill: var(--runtime-violet);
+}
+
+.runtime-graph__station--gate .runtime-graph__station-core {
+  fill: var(--runtime-amber);
+}
+
+.runtime-graph__station--service .runtime-graph__station-core {
+  fill: var(--runtime-service);
+}
+
+.runtime-graph__station-badge rect {
+  fill: rgba(242, 247, 251, 0.92);
+}
+
+.runtime-graph__station-badge text {
+  fill: #0a0f16;
+}
+
+.runtime-graph__trace-box {
+  fill: rgba(7, 10, 14, 0.82);
+  stroke: rgba(226, 236, 245, 0.11);
+}
+
+.runtime-graph__trace-title,
+.runtime-graph__trace-lane-label {
+  fill: rgba(226, 236, 245, 0.58);
+}
+
+.runtime-graph__trace-tick {
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.main-agent-message__mode {
+  display: inline-flex;
+  margin-left: 0.5rem;
+  padding: 0.08rem 0.4rem;
+  border: 1px solid var(--cyber-line-bright);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 0.66rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+@keyframes runtime-event-link {
+  0%,
+  100% {
+    opacity: 0.18;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* ── 交付验收 · 主交付收敛 ── */
+.outputs-deliverable-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.outputs-deliverable-card {
+  min-width: 0;
+  padding: 1.15rem 0;
+  border-top: 1px solid var(--cyber-line);
+}
+
+.outputs-deliverable-card--primary {
+  border-top-color: var(--accent);
+}
+
+.outputs-deliverable-card__eyebrow {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.outputs-deliverable-card h2 {
+  margin: 0 0 0.5rem;
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.outputs-deliverable-card p {
+  margin: 0 0 0.85rem;
+  color: var(--text-2);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.outputs-deliverable-card__file {
+  display: block;
+  margin-bottom: 0.85rem;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.outputs-quality,
+.outputs-evaluation {
+  border-left: 2px solid var(--accent) !important;
+}
+
+.outputs-quality--pass,
+.outputs-evaluation--pass {
+  border-left-color: var(--ok) !important;
+}
+
+.outputs-quality--fail,
+.outputs-evaluation--fail {
+  border-left-color: var(--risk-high) !important;
+}
+
+.outputs-evaluation--skipped {
+  border-left-color: var(--risk-mid) !important;
+}
+
+.outputs-quality__summary,
+.outputs-evaluation__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+
+.outputs-quality__summary strong,
+.outputs-evaluation__summary strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.outputs-quality__summary span,
+.outputs-evaluation__summary span {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+
+.outputs-quality__summary em,
+.outputs-evaluation__summary em {
+  color: var(--text-3);
+  font-size: 0.78rem;
+  font-style: normal;
+}
+
+.outputs-quality__metrics,
+.outputs-evaluation__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.outputs-quality__metrics div,
+.outputs-evaluation__metrics div {
+  min-width: 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--cyber-line);
+}
+
+.outputs-quality__metrics label,
+.outputs-evaluation__metrics label {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--text-3);
+  font-size: 0.72rem;
+}
+
+.outputs-quality__metrics b,
+.outputs-evaluation__metrics b {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.outputs-quality__issues span,
+.outputs-evaluation__issues span {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: var(--text-2);
+  font-size: 0.78rem;
+}
+
+.outputs-quality__issues ol,
+.outputs-evaluation__issues ol {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.outputs-quality__issues li,
+.outputs-evaluation__issues li {
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.outputs-quality__issues b,
+.outputs-evaluation__issues b {
+  display: block;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.outputs-quality__issues small,
+.outputs-evaluation__issues small {
+  display: block;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .outputs-deliverable-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .outputs-quality__metrics,
+  .outputs-evaluation__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .settling-graph {
@@ -902,11 +3083,21 @@ a:hover {
   color: var(--text-2);
 }
 
-.settling-graph__grad-glow-inner { stop-color: var(--graph-glow-inner); }
-.settling-graph__grad-glow-outer { stop-color: var(--graph-glow-outer); }
-.settling-graph__grad-edge-a { stop-color: var(--graph-edge-a); }
-.settling-graph__grad-edge-b { stop-color: var(--graph-edge-b); }
-.settling-graph__grad-edge-c { stop-color: var(--graph-edge-c); }
+.settling-graph__grad-glow-inner {
+  stop-color: var(--graph-glow-inner);
+}
+.settling-graph__grad-glow-outer {
+  stop-color: var(--graph-glow-outer);
+}
+.settling-graph__grad-edge-a {
+  stop-color: var(--graph-edge-a);
+}
+.settling-graph__grad-edge-b {
+  stop-color: var(--graph-edge-b);
+}
+.settling-graph__grad-edge-c {
+  stop-color: var(--graph-edge-c);
+}
 
 .settling-graph__header {
   display: flex;
@@ -1031,15 +3222,24 @@ a:hover {
 }
 
 @keyframes settle-stratum {
-  0%, 100% { opacity: 0.32; stroke: var(--cyber-line); }
-  45% { opacity: 0.62; stroke: rgba(160, 120, 80, 0.14); }
+  0%,
+  100% {
+    opacity: 0.32;
+    stroke: var(--cyber-line);
+  }
+  45% {
+    opacity: 0.62;
+    stroke: rgba(160, 120, 80, 0.14);
+  }
 }
 
 .settling-graph__edge {
   stroke: var(--cyber-line-bright);
   stroke-width: 1.25;
   fill: none;
-  transition: stroke 1.2s var(--settle-ease), opacity 1.2s var(--settle-ease);
+  transition:
+    stroke 1.2s var(--settle-ease),
+    opacity 1.2s var(--settle-ease);
 }
 
 .settling-graph__edge--done {
@@ -1055,8 +3255,13 @@ a:hover {
 }
 
 @keyframes settle-edge-breathe {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .settling-graph__edge--failed {
@@ -1092,9 +3297,17 @@ a:hover {
 }
 
 @keyframes settle-halo {
-  0% { transform: scale(0.72); opacity: 0.5; }
-  70% { opacity: 0.08; }
-  100% { transform: scale(1.55); opacity: 0; }
+  0% {
+    transform: scale(0.72);
+    opacity: 0.5;
+  }
+  70% {
+    opacity: 0.08;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
 }
 
 .settling-graph__glow-fill {
@@ -1103,15 +3316,22 @@ a:hover {
 }
 
 @keyframes settle-glow-pulse {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 0.9; }
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
 }
 
 .settling-graph__node-ring {
   fill: transparent;
   stroke: var(--cyber-line-bright);
   stroke-width: 1;
-  transition: stroke 0.9s var(--settle-ease), fill 0.9s var(--settle-ease);
+  transition:
+    stroke 0.9s var(--settle-ease),
+    fill 0.9s var(--settle-ease);
 }
 
 .settling-graph__node--done .settling-graph__node-ring {
@@ -1210,8 +3430,12 @@ a:hover {
 }
 
 @keyframes settle-ambient {
-  0% { opacity: 0.35; }
-  100% { opacity: 0.75; }
+  0% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 0.75;
+  }
 }
 
 .settling-graph__footnote {
@@ -1253,8 +3477,13 @@ a:hover {
 }
 
 @keyframes run-stage-breathe {
-  0%, 100% { border-bottom-color: var(--cyber-line); }
-  50% { border-bottom-color: rgba(196, 92, 38, 0.18); }
+  0%,
+  100% {
+    border-bottom-color: var(--cyber-line);
+  }
+  50% {
+    border-bottom-color: rgba(196, 92, 38, 0.18);
+  }
 }
 
 .run-stage--live .run-stage__hero {
@@ -1266,8 +3495,14 @@ a:hover {
 }
 
 @keyframes trace-settle {
-  0% { opacity: 0.4; transform: translateY(3px); }
-  100% { opacity: 1; transform: translateY(0); }
+  0% {
+    opacity: 0.4;
+    transform: translateY(3px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 运行中隐藏子页重复标题 */
@@ -1317,7 +3552,9 @@ a:hover {
 .project-hud--overview,
 .cyber-tag,
 .neon-field,
-.tech-backdrop { display: none !important; }
+.tech-backdrop {
+  display: none !important;
+}
 
 /* ── 表单 / 表格 ── */
 .input,
@@ -1366,9 +3603,15 @@ select.input {
   background: transparent !important;
 }
 
-.badge.high { color: var(--risk-high); }
-.badge.mid { color: var(--risk-mid); }
-.badge.low { color: var(--risk-low); }
+.badge.high {
+  color: var(--risk-high);
+}
+.badge.mid {
+  color: var(--risk-mid);
+}
+.badge.low {
+  color: var(--risk-low);
+}
 
 .alert {
   border-radius: 0 !important;
@@ -1393,8 +3636,12 @@ select.input {
   padding: 0.85rem 1rem !important;
   border-left: 3px solid var(--accent) !important;
 }
-.settling-banner--ok { border-left-color: var(--ok) !important; }
-.settling-banner--warn { border-left-color: var(--risk-mid) !important; }
+.settling-banner--ok {
+  border-left-color: var(--ok) !important;
+}
+.settling-banner--warn {
+  border-left-color: var(--risk-mid) !important;
+}
 
 /* ── 首页指标 ── */
 .metrics {
@@ -1431,9 +3678,16 @@ select.input {
   text-transform: uppercase !important;
   color: var(--text-3) !important;
 }
-.metric--high .metric__val { color: var(--risk-high) !important; text-shadow: none !important; }
-.metric--mid .metric__val { color: var(--risk-mid) !important; }
-.metric--low .metric__val { color: var(--risk-low) !important; }
+.metric--high .metric__val {
+  color: var(--risk-high) !important;
+  text-shadow: none !important;
+}
+.metric--mid .metric__val {
+  color: var(--risk-mid) !important;
+}
+.metric--low .metric__val {
+  color: var(--risk-low) !important;
+}
 
 .status-line {
   display: flex;
@@ -1534,9 +3788,15 @@ select.input {
   border-radius: var(--radius) !important;
 }
 @keyframes settling-shimmer {
-  0% { opacity: 0.55; }
-  50% { opacity: 1; }
-  100% { opacity: 0.55; }
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
+  }
 }
 
 .table-toolbar {
@@ -1618,7 +3878,9 @@ select.input {
   color: var(--text-2) !important;
 }
 
-.muted { color: var(--text-2) !important; }
+.muted {
+  color: var(--text-2) !important;
+}
 
 .telemetry-tile__value {
   font-size: 1.75rem !important;
@@ -1626,7 +3888,9 @@ select.input {
   text-shadow: none !important;
 }
 
-.prefs-bar__btn { border-radius: var(--radius) !important; }
+.prefs-bar__btn {
+  border-radius: var(--radius) !important;
+}
 
 /* ═══════════════════════════════════════════
    按钮 · 全文字链，无实体块
@@ -1706,7 +3970,9 @@ a.btn-outline {
   color: var(--text-3);
   cursor: pointer;
 }
-.tab:hover { color: var(--text-2); }
+.tab:hover {
+  color: var(--text-2);
+}
 .tab.active {
   color: var(--text);
   border-bottom: none;
@@ -1735,7 +4001,9 @@ a.btn-outline {
 .upload-zone--ready .upload-zone__title {
   color: var(--text) !important;
 }
-.upload-zone__grid { display: none !important; }
+.upload-zone__grid {
+  display: none !important;
+}
 .upload-zone__hex {
   display: none !important;
 }
@@ -1748,42 +4016,14 @@ a.btn-outline {
   color: var(--text-3) !important;
 }
 
-.quick-link-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-.quick-link-tile {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.35rem 0;
-  text-decoration: none;
-  color: var(--text-2);
-  border: none !important;
-  background: transparent !important;
-  transition: color 0.2s;
-}
-.quick-link-tile:hover {
-  color: var(--text);
-  text-decoration: none;
-}
-.quick-link-tile__label {
-  font-size: 0.8125rem;
-  font-weight: 500;
-}
-.quick-link-tile__arrow {
-  color: var(--accent);
-  opacity: 0.6;
-}
-.quick-link-tile:hover .quick-link-tile__arrow { opacity: 1; }
-
 .ingest-grid {
   grid-template-columns: 1fr;
   gap: 1.5rem;
 }
 @media (min-width: 900px) {
-  .ingest-grid { grid-template-columns: 1fr 1.1fr; }
+  .ingest-grid {
+    grid-template-columns: 1fr 1.1fr;
+  }
 }
 .ingest-grid--readonly {
   grid-template-columns: 1fr !important;
@@ -1944,10 +4184,80 @@ code {
   }
 }
 
+@media (max-width: 1400px) and (min-width: 769px) {
+  :root {
+    --side-w: 244px;
+  }
+
+  .shell {
+    display: block !important;
+  }
+
+  .shell-side {
+    padding: 1.45rem 1.2rem 1.1rem !important;
+  }
+
+  .shell-brand__name {
+    font-size: 1.4rem !important;
+  }
+
+  .shell-brand__sub {
+    font-size: 0.82rem !important;
+  }
+
+  .shell-main {
+    margin-left: var(--side-w) !important;
+    margin-right: 0 !important;
+    min-height: 100dvh;
+  }
+
+  .shell-content {
+    padding: 1.5rem clamp(1rem, 2vw, 1.5rem) 2.5rem !important;
+  }
+
+  .shell-agent {
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: auto !important;
+    margin-left: var(--side-w) !important;
+    border-left: none !important;
+    border-top: 1px solid var(--cyber-line) !important;
+    background: var(--cyber-bg) !important;
+  }
+
+  .main-agent-panel {
+    min-height: 430px;
+    max-height: 680px;
+  }
+
+  .main-agent-messages {
+    max-height: 320px;
+  }
+
+  .runtime-graph__svg {
+    min-width: 0 !important;
+  }
+}
+
 @media (max-width: 768px) {
-  .shell-content { padding: 2rem 1.5rem 3rem !important; }
-  :root { --side-w: 100%; }
-  .shell-main { margin-left: 0 !important; }
+  .shell-content {
+    padding: 2rem 1.5rem 3rem !important;
+  }
+  :root {
+    --side-w: 100%;
+  }
+  .shell-main {
+    margin-left: 0 !important;
+  }
+  .shell-agent {
+    position: static !important;
+    width: auto !important;
+    margin-left: 0 !important;
+    border-left: none !important;
+    border-top: 1px solid var(--cyber-line) !important;
+  }
   .shell-side {
     position: relative !important;
     width: 100% !important;
@@ -1956,5 +4266,7 @@ code {
     border-right: none !important;
     border-bottom: 1px solid var(--cyber-line) !important;
   }
-  .shell { flex-direction: column; }
+  .shell {
+    flex-direction: column;
+  }
 }
