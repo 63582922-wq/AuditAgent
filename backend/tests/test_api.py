@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.database import SessionLocal, init_db
 from app.main import app
-from app.models import AgentActionProposal, AnalysisJob, FileRecord, LearningProposal, Project, Risk
+from app.models import AgentActionProposal, AnalysisJob, FileRecord, LearningProposal, Output, Project, Risk
 from app.services.agent.workflow import AgentWorkflow
 from app.services.meeting_service import create_meeting
 from app.services.seed import seed_rules
@@ -130,3 +130,43 @@ def test_agent_feedback_is_governed_and_meeting_job_can_be_cancelled(client, db)
     assert cancelled.json()["status"] == "cancel_requested"
     db.refresh(job)
     assert job.status == "cancel_requested"
+
+
+def test_delivery_acceptance_api_blocks_preview_with_unresolved_template_fields(client, db):
+    project = Project(name="交付门禁测试", status="active")
+    db.add(project)
+    db.commit()
+    meeting = create_meeting(db, project.id, meeting_code="GATE-001")
+    meeting.status = "needs_review"
+    meeting.deliverable_json = {
+        "status": "needs_review",
+        "template_quality": {"status": "needs_review", "issue_field_count": 4},
+        "evidence_gate": {"blocked": False},
+        "evaluation_gate": {"blocked": False},
+    }
+    db.add_all(
+        [
+            Output(
+                project_id=project.id,
+                meeting_id=meeting.id,
+                output_type="fixed_template_excel",
+                file_name="固定模板输出.xlsx",
+                storage_path="/tmp/gate-template.xlsx",
+            ),
+            Output(
+                project_id=project.id,
+                meeting_id=meeting.id,
+                output_type="deliverable_package",
+                file_name="GATE-001.zip",
+                storage_path="/tmp/gate.zip",
+            ),
+        ]
+    )
+    db.commit()
+
+    response = client.post(f"/api/projects/{project.id}/meetings/{meeting.id}/deliverables/accept")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "DELIVERY_GATE_BLOCKED"
+    db.refresh(meeting)
+    assert meeting.status == "needs_review"

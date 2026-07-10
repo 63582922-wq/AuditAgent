@@ -174,6 +174,14 @@ export default function MeetingOutputsPage() {
   const visibleOutputs = dedupeOutputs(outputs).sort((a, b) => outputRank(a.output_type) - outputRank(b.output_type));
   const primaryDeliverable = visibleOutputs.find((o) => o.output_type === "fixed_template_excel");
   const archiveOutput = visibleOutputs.find((o) => o.output_type === "deliverable_package");
+  const evidenceGate = deliverable?.evidence_gate ?? project?.state_json?.evidence_gate;
+  const formalDeliveryBlocks = [
+    evidenceGate?.blocked ? t("outputsPage.deliveryBlockEvidence") : "",
+    deliverable?.evaluation_gate?.blocked ? t("outputsPage.deliveryBlockEvaluation") : "",
+    deliverable?.template_gate?.blocked || qualityStatus !== "pass" ? t("outputsPage.deliveryBlockTemplate") : "",
+    !primaryDeliverable || !archiveOutput ? t("outputsPage.deliveryBlockOutputs") : "",
+  ].filter(Boolean);
+  const formalDeliveryBlocked = formalDeliveryBlocks.length > 0;
   const canReview =
     outputs.length > 0 &&
     ["completed", "needs_review", "deliverable_rejected"].includes(project?.status ?? "") &&
@@ -243,6 +251,12 @@ export default function MeetingOutputsPage() {
           {deliverable.comment
             ? t("outputsPage.rejectedWith", { comment: deliverable.comment })
             : t("outputsPage.rejected")}
+        </Block>
+      )}
+      {formalDeliveryBlocked && deliverable?.status !== "accepted" && (
+        <Block className="settling-banner settling-banner--warn" title={t("outputsPage.deliveryBlockedTitle")} hint={t("outputsPage.deliveryBlockedHint")}>
+          <p style={{ margin: 0 }}>{deliverable?.comment || formalDeliveryBlocks.join("；")}</p>
+          <p className="muted" style={{ margin: "0.55rem 0 0" }}>{t("outputsPage.deliveryBlockedAction")}</p>
         </Block>
       )}
 
@@ -390,7 +404,7 @@ export default function MeetingOutputsPage() {
             {t("outputsPage.reviewHint")}
           </p>
           <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
-            <ActionButton onClick={onAccept} disabled={busy}>
+            <ActionButton onClick={onAccept} disabled={busy || formalDeliveryBlocked}>
               {t("outputsPage.accept")}
             </ActionButton>
             <input

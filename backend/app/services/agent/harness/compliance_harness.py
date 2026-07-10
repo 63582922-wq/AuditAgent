@@ -424,12 +424,22 @@ class ComplianceHarness:
         deliverable.setdefault("status", "pending")
         deliverable.setdefault("comment", "")
         deliverable["evaluation"] = compact_compliance_evaluation(report)
+        template_quality = deliverable.get("template_quality") if isinstance(deliverable.get("template_quality"), dict) else None
+        template_status = str((template_quality or {}).get("status") or "")
+        template_blocked = template_status != "pass"
+        deliverable["template_gate"] = {
+            "blocked": template_blocked,
+            "reason": "template_quality_not_passed" if template_quality else "template_quality_missing",
+            "status": template_status or None,
+            "issue_field_count": int((template_quality or {}).get("issue_field_count") or 0),
+        }
+        delivery_block_messages: list[str] = []
+        if template_blocked:
+            delivery_block_messages.append("143 列固定模板仍有待补、低置信或人工责任字段，当前仅生成待复核预览交付物。")
         evidence_state = state.get("evidence_gate") if isinstance(state.get("evidence_gate"), dict) else {}
         if evidence_state.get("blocked"):
-            deliverable["status"] = "needs_review"
             deliverable["evidence_gate"] = evidence_state
-            deliverable["comment"] = "关键事实存在冲突或缺少直接证据，当前仅生成待复核预览交付物。"
-            meeting.status = "needs_review"
+            delivery_block_messages.append("关键事实存在冲突或缺少直接证据，当前仅生成待复核预览交付物。")
         if (
             report.get("status") == "completed"
             and report.get("passed") is False
@@ -440,15 +450,13 @@ class ComplianceHarness:
                 for item in report.get("checks", [])
                 if not item.get("passed") and item.get("severity") == "critical" and item.get("check_id")
             ]
-            deliverable["status"] = "needs_review"
             deliverable["evaluation_gate"] = {
                 "blocked": True,
                 "reason": "automatic_evaluation_failed",
                 "critical_failures": int(report.get("critical_failures") or 0),
                 "failed_check_ids": failed_ids,
             }
-            deliverable["comment"] = "自动评估存在严重失败，需定向复核后再交付。"
-            meeting.status = "needs_review"
+            delivery_block_messages.append("自动评估存在严重失败，需定向复核后再交付。")
         elif report.get("status") == "completed" and report.get("passed") is True:
             deliverable["evaluation_gate"] = {
                 "blocked": False,
@@ -456,6 +464,10 @@ class ComplianceHarness:
                 "critical_failures": 0,
                 "failed_check_ids": [],
             }
+        if delivery_block_messages:
+            deliverable["status"] = "needs_review"
+            deliverable["comment"] = " ".join(delivery_block_messages)
+            meeting.status = "needs_review"
         state["deliverable"] = deliverable
         meeting.state_json = state
         meeting.deliverable_json = deliverable

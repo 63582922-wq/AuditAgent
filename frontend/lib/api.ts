@@ -189,10 +189,26 @@ export type ProjectStateJson = {
     registered_agents?: { id: string; name: string; station: string; tools?: string[] }[];
   };
   deliverable?: {
-    status?: "pending" | "accepted" | "rejected";
+    status?: "pending" | "accepted" | "rejected" | "needs_review";
     comment?: string;
     accepted_at?: string;
     rejected_at?: string;
+    evidence_gate?: {
+      blocked?: boolean;
+      reason?: string;
+      blocked_fact_keys?: string[];
+    };
+    evaluation_gate?: {
+      blocked?: boolean;
+      reason?: string;
+      failed_check_ids?: string[];
+    };
+    template_gate?: {
+      blocked?: boolean;
+      reason?: string;
+      status?: "pass" | "needs_review" | "fail";
+      issue_field_count?: number;
+    };
     template_quality?: {
       status?: "pass" | "needs_review" | "fail";
       total_fields?: number;

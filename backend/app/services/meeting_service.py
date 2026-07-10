@@ -23,6 +23,7 @@ from app.models import (
     Risk,
 )
 from app.services.output_scope import primary_output_count
+from app.services.domain.compliance.constants import PRIMARY_DELIVERABLE_TYPES
 
 
 def _normalize_code(code: str) -> str:
@@ -58,6 +59,69 @@ def get_meeting(db: Session, project_id: str, meeting_id: str) -> Meeting:
     if not m:
         raise FXPGError("子会议不存在", code="MEETING_NOT_FOUND", status=404)
     return m
+
+
+_DELIVERY_GATE_LABELS = {
+    "evidence_gate": "关键事实证据存在冲突、缺失或待核实",
+    "evaluation_gate": "自动评估存在严重失败",
+    "template_gate": "143 列固定模板尚未达到正式交付质量门禁",
+    "primary_deliverables": "主交付物不完整（需固定模板 Excel 和 ZIP 归档）",
+}
+
+
+def delivery_acceptance_gate(db: Session, meeting: Meeting) -> dict[str, Any]:
+    """Return the one formal-delivery gate used by API, UI and the Main Agent.
+
+    Preview artifacts are useful while facts or handoff fields remain unresolved,
+    but they must never be accepted as the official delivery.
+    """
+    state = dict(meeting.state_json or {})
+    deliverable = dict(meeting.deliverable_json or state.get("deliverable") or {})
+    blocks: list[dict[str, Any]] = []
+    for key in ("evidence_gate", "evaluation_gate", "template_gate"):
+        gate = deliverable.get(key)
+        if not isinstance(gate, dict) and key == "evidence_gate":
+            gate = state.get("evidence_gate")
+        if isinstance(gate, dict) and gate.get("blocked"):
+            blocks.append({"code": key, "detail": gate})
+
+    template_quality = deliverable.get("template_quality")
+    if not isinstance(template_quality, dict) or template_quality.get("status") != "pass":
+        if not any(item["code"] == "template_gate" for item in blocks):
+            blocks.append(
+                {
+                    "code": "template_gate",
+                    "detail": {
+                        "blocked": True,
+                        "reason": "template_quality_not_passed" if isinstance(template_quality, dict) else "template_quality_missing",
+                        "status": template_quality.get("status") if isinstance(template_quality, dict) else None,
+                    },
+                }
+            )
+
+    output_types = {
+        row[0]
+        for row in db.query(Output.output_type)
+        .filter_by(project_id=meeting.project_id, meeting_id=meeting.id)
+        .filter(Output.output_type.in_(PRIMARY_DELIVERABLE_TYPES))
+        .all()
+    }
+    missing_outputs = [item for item in PRIMARY_DELIVERABLE_TYPES if item not in output_types]
+    if missing_outputs:
+        blocks.append(
+            {
+                "code": "primary_deliverables",
+                "detail": {"blocked": True, "reason": "required_outputs_missing", "missing_output_types": missing_outputs},
+            }
+        )
+
+    messages = [_DELIVERY_GATE_LABELS[item["code"]] for item in blocks]
+    return {
+        "blocked": bool(blocks),
+        "reason": "formal_delivery_ready" if not blocks else "formal_delivery_blocked",
+        "blocks": blocks,
+        "message": "；".join(messages) if messages else "正式交付门禁已通过",
+    }
 
 
 def list_meetings(db: Session, project_id: str) -> list[Meeting]:
@@ -240,6 +304,13 @@ def accept_meeting_deliverables(db: Session, project_id: str, meeting_id: str) -
     meeting = get_meeting(db, project_id, meeting_id)
     if meeting.status not in ("completed", "needs_review", "deliverable_rejected"):
         raise FXPGError("分析尚未完成，无法验收", code="NOT_READY", status=400)
+    gate = delivery_acceptance_gate(db, meeting)
+    if gate["blocked"]:
+        raise FXPGError(
+            f"正式验收已阻断：{gate['message']}。请完成复核、补件或重跑后再验收。",
+            code="DELIVERY_GATE_BLOCKED",
+            status=409,
+        )
     deliverable = dict(meeting.deliverable_json or {})
     deliverable.update(
         {

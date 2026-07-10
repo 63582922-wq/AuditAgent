@@ -28,6 +28,7 @@ from app.services.embedding_service import embed_memory_content
 from app.services.memory_rag import retrieve_memories
 from app.services.output_scope import primary_output_count
 from app.services.domain.compliance.evidence_graph import fact_citations
+from app.services.meeting_service import delivery_acceptance_gate
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ class ChatContext:
     findings_summary: list[dict[str, Any]]
     current_facts: dict[str, Any]
     citations: list[dict[str, Any]]
+    delivery_gate: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -89,6 +91,7 @@ class ChatContext:
             "findings_summary": self.findings_summary,
             "current_facts": self.current_facts,
             "citations": self.citations,
+            "delivery_gate": self.delivery_gate,
         }
 
 
@@ -401,6 +404,7 @@ def build_chat_context(
             findings_summary=[],
             current_facts={},
             citations=[],
+            delivery_gate={},
         )
 
     filters: dict[str, Any] = {"project_id": project.id}
@@ -425,6 +429,7 @@ def build_chat_context(
 
     job = _latest_job(db, project.id, meeting.id if meeting else None)
     citations = fact_citations(db, project.id, meeting.id, limit=12) if meeting else []
+    delivery_gate = delivery_acceptance_gate(db, meeting) if meeting else {}
     return ChatContext(
         project_id=project.id,
         project_name=project.name,
@@ -446,6 +451,7 @@ def build_chat_context(
         findings_summary=_risk_summary(risks),
         current_facts=current_facts,
         citations=citations,
+        delivery_gate=delivery_gate,
     )
 
 
@@ -466,6 +472,8 @@ def suggest_actions(message: str, ctx: ChatContext) -> list[AgentChatAction]:
     if _contains_any(message, ["finding", "风险", "证据", "复核", "review", "evidence"]):
         return _actions("findings", "review", "files", has_meeting=has_meeting)
     if _contains_any(message, ["交付", "验收", "下载", "退回", "accept", "reject", "deliver", "output"]):
+        if has_meeting and ctx.delivery_gate.get("blocked"):
+            return _actions("outputs", "review", "reanalyze", "logs", has_meeting=has_meeting)
         return _actions("outputs", "accept", "reject", has_meeting=has_meeting)
     if _contains_any(message, ["重跑", "重新", "再分析", "reanalyze", "rerun"]):
         return _actions("reanalyze", "review", "logs", has_meeting=has_meeting)
@@ -668,6 +676,12 @@ def fallback_reply(message: str, ctx: ChatContext) -> str:
         missing_text = "、".join(str(item.get("document_type") or item) for item in ctx.missing_documents[:6])
         return base + material_status + f"当前仍有缺件：{missing_text}。应先补对应资料，再重新运行分析。"
     if _contains_any(message, ["交付", "验收", "下载", "退回", "accept", "reject", "deliver", "output"]):
+        if ctx.delivery_gate.get("blocked"):
+            return (
+                base
+                + f"当前正式验收已阻断：{ctx.delivery_gate.get('message') or '交付门禁未通过'}。"
+                + "可以下载预览 Excel 和 ZIP 核对，但应先完成复核、补件或重跑，不能标记为已验收。"
+            )
         return base + "交付动作应在交付验收页完成，下载核对后再验收；退回和重新分析都应保留结构化记录。"
     if _contains_any(message, ["finding", "风险", "证据", "复核", "review", "evidence"]):
         return base + material_status + finding_text

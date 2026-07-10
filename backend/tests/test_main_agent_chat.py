@@ -547,6 +547,31 @@ def test_main_agent_chat_governs_rule_learning_even_when_llm_is_available(db, ch
 
 def test_approve_agent_action_executes_accept_and_updates_proposal(db, chat_case, monkeypatch):
     project, meeting = chat_case
+    meeting.deliverable_json = {
+        "status": "pending",
+        "template_quality": {"status": "pass"},
+        "evidence_gate": {"blocked": False},
+        "evaluation_gate": {"blocked": False},
+    }
+    db.add_all(
+        [
+            Output(
+                project_id=project.id,
+                meeting_id=meeting.id,
+                output_type="fixed_template_excel",
+                file_name="固定模板输出.xlsx",
+                storage_path="/tmp/fixed-template.xlsx",
+            ),
+            Output(
+                project_id=project.id,
+                meeting_id=meeting.id,
+                output_type="deliverable_package",
+                file_name="A1P-CHAT.zip",
+                storage_path="/tmp/A1P-CHAT.zip",
+            ),
+        ]
+    )
+    db.commit()
     monkeypatch.setattr("app.services.agent.llm_client.llm_available", lambda: False)
 
     out = run_main_agent_chat(
@@ -566,3 +591,19 @@ def test_approve_agent_action_executes_accept_and_updates_proposal(db, chat_case
     assert meeting.status == "accepted"
     assert proposal.status == "executed"
     assert proposal.executed_at is not None
+
+
+def test_main_agent_does_not_offer_acceptance_while_delivery_gate_is_blocked(db, chat_case, monkeypatch):
+    project, meeting = chat_case
+    monkeypatch.setattr("app.services.agent.llm_client.llm_available", lambda: False)
+
+    out = run_main_agent_chat(
+        db,
+        message="帮我验收通过",
+        project_id=project.id,
+        meeting_id=meeting.id,
+    )
+
+    assert out.context["delivery_gate"]["blocked"] is True
+    assert "验收已阻断" in out.reply
+    assert not any(action.id == "accept" for action in out.actions)
