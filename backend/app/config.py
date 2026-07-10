@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     api_key: str = ""
     max_upload_mb: int = 50
     job_workers: int = 2
+    job_recovery_stale_sec: int = Field(default=300, validation_alias="JOB_RECOVERY_STALE_SEC")
     human_gate_manual_threshold: int = 5
     human_gate_manual_ratio: float = 0.45
     human_gate_high_threshold: int = 3

@@ -36,10 +36,17 @@ def trace_code_location(skip_modules: set[str] | None = None) -> dict[str, Any]:
 class AgentTrace:
     """结构化 Agent 执行追踪，写入 agent_run_logs。"""
 
-    def __init__(self, db: Session, project_id: str, meeting_id: str | None = None):
+    def __init__(
+        self,
+        db: Session,
+        project_id: str,
+        meeting_id: str | None = None,
+        run_id: str | None = None,
+    ):
         self.db = db
         self.project_id = project_id
         self.meeting_id = meeting_id
+        self.run_id = run_id
 
     def log(
         self,
@@ -53,6 +60,8 @@ class AgentTrace:
         duration_ms: Optional[int] = None,
     ) -> None:
         payload: Dict[str, Any] = {"kind": kind, "name": name or step, "message": message}
+        if self.run_id:
+            payload["run_id"] = self.run_id
         if detail:
             payload.update(detail)
         payload.setdefault("code_location", trace_code_location())

@@ -6,6 +6,7 @@ import {
   Job,
   ProjectLive,
   fetchLatestJob,
+  fetchMeetingRunEvents,
   fetchProjectLive,
   isNetworkError,
   isNotFoundError,
@@ -103,11 +104,22 @@ export function ProjectLiveProvider({
       const boosted = Date.now() < boostUntil;
       if (includeLogs && nextLive) {
         try {
-          const logPath = meetingId
-            ? `/projects/${projectId}/meetings/${meetingId}/logs`
-            : `/projects/${projectId}/logs`;
-          const logs = await api<ActivityLog[]>(logPath, { cache: "no-store" });
-          setTraceLogs(logs);
+          if (meetingId) {
+            const snapshot = await fetchMeetingRunEvents(projectId, meetingId);
+            setTraceLogs(
+              snapshot.events.map((event) => ({
+                id: event.id,
+                step: event.step,
+                status: event.status,
+                detail_json: event.detail,
+                duration_ms: event.duration_ms ?? undefined,
+                created_at: event.created_at || new Date().toISOString(),
+              })),
+            );
+          } else {
+            const logs = await api<ActivityLog[]>(`/projects/${projectId}/logs`, { cache: "no-store" });
+            setTraceLogs(logs);
+          }
         } catch {
           /* logs optional */
         }

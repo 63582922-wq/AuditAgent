@@ -9,7 +9,7 @@ from app.config import settings
 from app.database import SessionLocal, init_db
 from app.exceptions import FXPGError, fxpg_exception_handler, generic_exception_handler
 from app.logging_config import setup_logging
-from app.services.jobs.worker import get_executor
+from app.services.jobs.worker import get_executor, recover_pending_jobs
 from app.services.seed import seed_memories, seed_rules, sync_pgvector_from_json
 
 
@@ -36,6 +36,9 @@ async def lifespan(_app: FastAPI):
             sync_pgvector_from_json(db)
     finally:
         db.close()
+    recovered = recover_pending_jobs()
+    if recovered:
+        logging.getLogger(__name__).info("Recovered %s persisted analysis job(s)", recovered)
     try:
         yield
     finally:

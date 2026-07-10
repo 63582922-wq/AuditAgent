@@ -42,7 +42,11 @@ class AgentChatAction(BaseModel):
 
 class AgentChatResponse(BaseModel):
     reply: str
+    answer: str = ""
     actions: list[AgentChatAction] = Field(default_factory=list)
+    planned_actions: list[AgentChatAction] = Field(default_factory=list)
+    citations: list[Dict[str, Any]] = Field(default_factory=list)
+    intent: str = "consult"
     mode: str
     context: Dict[str, Any] = Field(default_factory=dict)
 
@@ -58,6 +62,20 @@ class AgentActionApproveResponse(BaseModel):
     status: str
     message: Optional[str] = None
     job_id: Optional[str] = None
+
+
+class AgentFeedbackRequest(BaseModel):
+    feedback: str
+    project_id: str
+    meeting_id: Optional[str] = None
+    original_conclusion: Optional[str] = None
+
+
+class AgentFeedbackResponse(BaseModel):
+    ok: bool
+    proposal_id: str
+    status: str
+    message: str
 
 
 class MeetingCreate(BaseModel):

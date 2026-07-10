@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useProjectLiveOptional } from "@/contexts/ProjectLiveContext";
-import { agentChat, approveAgentAction } from "@/lib/api";
+import { agentChat, approveAgentAction, type AgentCitation } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { statusLabel } from "@/lib/i18n/workflow-steps";
 
@@ -28,7 +28,9 @@ type AgentMessage = {
   role: "agent" | "user";
   text: string;
   actions?: AgentAction[];
-  mode?: "live" | "fallback" | "offline";
+  citations?: AgentCitation[];
+  intent?: string;
+  mode?: "live" | "fallback" | "offline" | "governed";
 };
 
 type ReplyContext = {
@@ -71,7 +73,7 @@ const ACTION_REVIEW: AgentAction = {
   id: "review",
   labelKey: "mainAgent.actions.review",
   descKey: "mainAgent.actions.reviewDesc",
-  segment: "review",
+  segment: "risks",
   requiresMeeting: true,
 };
 
@@ -126,7 +128,8 @@ function uid(prefix: string) {
 }
 
 function normalizeSegment(segment: string): AgentActionSegment {
-  if (segment === "files" || segment === "risks" || segment === "review" || segment === "outputs" || segment === "logs") {
+  if (segment === "review") return "risks";
+  if (segment === "files" || segment === "risks" || segment === "outputs" || segment === "logs") {
     return segment;
   }
   return "projects";
@@ -216,7 +219,32 @@ function messageModeLabel(mode: AgentMessage["mode"], t: Translate) {
   if (mode === "offline") return t("mainAgent.modeOffline");
   if (mode === "fallback") return t("mainAgent.modeFallback");
   if (mode === "live") return t("mainAgent.modeLive");
+  if (mode === "governed") return t("mainAgent.modeGoverned");
   return "";
+}
+
+const FACT_LABELS: Record<string, string> = {
+  actual_date: "实际日期",
+  actual_duration_minutes: "实际时长",
+  actual_sign_in_count: "实际签到人数",
+  max_attendee_count: "最高参会人数",
+  observation_success: "会议实际举办",
+  presentation_topic: "PPT 主题",
+  material_code: "材料编码",
+  planned_attendees: "计划参会人数",
+  total_budget: "预算金额",
+};
+
+function citationLabel(citation: AgentCitation) {
+  const name = FACT_LABELS[citation.fact_key] ?? citation.fact_key;
+  const value = citation.value === null || citation.value === undefined || citation.value === "" ? "待核实" : String(citation.value);
+  return `${name}：${value}`;
+}
+
+function citationSource(citation: AgentCitation) {
+  const source = citation.source ?? {};
+  const parts = [source.source_kind, source.page_number ? `第 ${source.page_number} 页` : null].filter(Boolean);
+  return parts.join(" · ") || "资料证据";
 }
 
 export function MainAgentDrawer({
@@ -318,9 +346,11 @@ export function MainAgentDrawer({
         {
           id: uid("agent"),
           role: "agent",
-          text: remote.reply,
-          actions: normalizeRemoteActions(remote.actions),
-          mode: remote.mode === "llm" ? "live" : "fallback",
+          text: remote.answer || remote.reply,
+          actions: normalizeRemoteActions(remote.planned_actions || remote.actions),
+          citations: remote.citations,
+          intent: remote.intent,
+          mode: remote.mode === "llm" ? "live" : remote.mode === "governed_feedback" ? "governed" : "fallback",
         },
       ]);
     } catch {
@@ -411,6 +441,24 @@ export function MainAgentDrawer({
                 <span className="main-agent-message__mode">{messageModeLabel(message.mode, t)}</span>
               )}
             </p>
+            {!!message.citations?.length && (
+              <div className="main-agent-citations" aria-label="本次回答的事实依据">
+                <span className="main-agent-citations__label">事实依据</span>
+                {message.citations.slice(0, 5).map((citation) => (
+                  <div
+                    key={`${message.id}-${citation.fact_key}`}
+                    className={`main-agent-citation main-agent-citation--${citation.status}`}
+                    title={citation.source?.evidence || citationLabel(citation)}
+                  >
+                    <strong>{citationLabel(citation)}</strong>
+                    <span>
+                      {citation.status === "accepted" ? "已采信" : citation.status === "conflict" ? "存在冲突" : "待核实"}
+                      {" · "}{citationSource(citation)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             {!!message.actions?.length && (
               <div className="main-agent-actions">
                 {message.actions.map((action) => {

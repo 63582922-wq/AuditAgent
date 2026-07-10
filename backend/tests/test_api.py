@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.database import SessionLocal, init_db
 from app.main import app
-from app.models import AgentActionProposal, FileRecord, Project, Risk
+from app.models import AgentActionProposal, AnalysisJob, FileRecord, LearningProposal, Project, Risk
 from app.services.agent.workflow import AgentWorkflow
 from app.services.meeting_service import create_meeting
 from app.services.seed import seed_rules
@@ -95,3 +95,38 @@ def test_batch_delete_project_removes_new_project_child_tables(client, db):
     db.expire_all()
     assert db.get(Project, project_id) is None
     assert db.get(AgentActionProposal, proposal_id) is None
+
+
+def test_agent_feedback_is_governed_and_meeting_job_can_be_cancelled(client, db):
+    project = Project(name="受控学习与取消测试", status="active")
+    db.add(project)
+    db.commit()
+    meeting = create_meeting(db, project.id, meeting_code="GOVERNED-001")
+    job = AnalysisJob(
+        project_id=project.id,
+        meeting_id=meeting.id,
+        status="queued",
+        current_step="queued",
+        progress_pct=0,
+    )
+    db.add(job)
+    db.commit()
+
+    feedback = client.post(
+        "/api/agent/feedback",
+        json={
+            "project_id": project.id,
+            "meeting_id": meeting.id,
+            "feedback": "确认单里的实际参会人数应以平台峰值为准。",
+            "original_conclusion": "当前人数为 12",
+        },
+    )
+    assert feedback.status_code == 200
+    assert feedback.json()["status"] == "pending"
+    assert db.query(LearningProposal).filter_by(project_id=project.id, meeting_id=meeting.id).count() == 1
+
+    cancelled = client.post(f"/api/projects/{project.id}/meetings/{meeting.id}/jobs/{job.id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancel_requested"
+    db.refresh(job)
+    assert job.status == "cancel_requested"

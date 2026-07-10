@@ -1,6 +1,6 @@
 import pytest
 
-from app.models import AgentActionProposal, AgentRunLog, AnalysisJob, FileRecord, Meeting, Memory, Output, ParsedDocument, Project, Risk
+from app.models import AgentActionProposal, AgentRunLog, AnalysisJob, FileRecord, LearningProposal, Meeting, Memory, Output, ParsedDocument, Project, Risk
 from app.services.embedding_service import embed_memory_content
 from app.services.agent.action_executor import approve_agent_action
 from app.services.agent.main_chat import run_main_agent_chat
@@ -67,7 +67,7 @@ def _case(db):
 
 
 def _cleanup_case(db, project_id: str):
-    for model in (AgentActionProposal, AgentRunLog, AnalysisJob, Output, Risk, ParsedDocument, FileRecord, Meeting):
+    for model in (AgentActionProposal, LearningProposal, AgentRunLog, AnalysisJob, Output, Risk, ParsedDocument, FileRecord, Meeting):
         db.query(model).filter_by(project_id=project_id).delete()
     db.query(Project).filter_by(id=project_id).delete()
     for text in (
@@ -518,16 +518,9 @@ def test_main_agent_chat_proposes_user_approved_rule_learning(db, chat_case, mon
     result = approve_agent_action(db, learn.proposal_id)
 
     assert result["ok"] is True
-    assert result["status"] == "learned"
-    saved = (
-        db.query(Memory)
-        .filter(Memory.memory_type == "rule_feedback_policy", Memory.content.contains("手写到场时间低置信时不能判通过"))
-        .first()
-    )
-    assert saved is not None
-    assert "user_approved" in saved.tags
-    assert "structured_policy" in saved.tags
-    assert "required_cases" in saved.content
+    assert result["status"] == "approved_pending_regression"
+    assert db.query(Memory).filter(Memory.content.contains("手写到场时间低置信时不能判通过")).count() == 0
+    assert db.query(LearningProposal).filter_by(project_id=project.id, status="approved_pending_regression").count() == 1
 
 
 def test_main_agent_chat_governs_rule_learning_even_when_llm_is_available(db, chat_case, monkeypatch):

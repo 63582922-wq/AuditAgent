@@ -76,6 +76,7 @@ def test_meetings_manager_guards_large_selection_and_editing():
 def test_review_and_outputs_actions_have_busy_and_message_states():
     outputs = read_frontend("frontend/app/projects/[id]/meetings/[meetingId]/outputs/page.tsx")
     review = read_frontend("frontend/app/projects/[id]/meetings/[meetingId]/review/page.tsx")
+    risks = read_frontend("frontend/app/projects/[id]/meetings/[meetingId]/risks/page.tsx")
 
     assert "actionMsgKind" in outputs
     assert 'alert ${actionMsgKind}' in outputs
@@ -105,10 +106,13 @@ def test_review_and_outputs_actions_have_busy_and_message_states():
     assert outputs.index('"fixed_template_excel",') < outputs.index('"deliverable_package",')
     assert outputs.index('"material_parse_index",') > outputs.index("const INTERNAL_OUTPUT_TYPES")
 
-    assert "msgKind" in review
-    assert 'alert ${msgKind}' in review
-    assert 'setBusy("regenerate")' in review
-    assert "disabled={!!busy}" in review
+    # 复核是审核结论的一部分；旧路径只保留兼容跳转，不能再维护第二套操作页面。
+    assert "router.replace" in review
+    assert "/risks" in review
+    assert "messageKind" in risks
+    assert 'alert ${messageKind}' in risks
+    assert 'setBusy("regenerate")' in risks
+    assert "disabled={!!busy}" in risks
 
 
 def test_meeting_navigation_avoids_dead_and_duplicate_entry_points():
@@ -176,7 +180,8 @@ def test_main_agent_panel_uses_live_context_and_routes_actions():
     source = read_frontend("frontend/components/MainAgentDrawer.tsx")
 
     assert "useProjectLiveOptional" in source
-    assert 'import { agentChat, approveAgentAction } from "@/lib/api";' in source
+    assert "agentChat, approveAgentAction" in source
+    assert "AgentCitation" in source
     assert "await agentChat" in source
     assert "normalizeRemoteActions" in source
     assert "requires_approval" in source
@@ -193,12 +198,14 @@ def test_main_agent_panel_uses_live_context_and_routes_actions():
     assert "mainAgent.messages.status" not in source
     assert "mainAgent.messages." in source
     assert "main-agent-message__mode" in source
+    assert "main-agent-citations" in source
     assert "data-agent-action-card" in source
     assert "data-agent-proposal-id" in source
     assert "chatBusy" in source
     assert 'segment: "files"' in source
     assert 'segment: "risks"' in source
-    assert 'segment: "review"' in source
+    assert 'id: "review"' in source
+    assert 'segment: "review"' not in source
     assert 'segment: "outputs"' in source
     assert "hrefForAction" in source
     assert "main-agent-panel" in source
@@ -223,38 +230,25 @@ def test_live_context_exposes_not_found_instead_of_fake_zero_state():
     assert "LiveWorkflowGraph" in overview
 
 
-def test_runtime_graph_is_high_contrast_full_topology_not_legacy_settling_graph():
+def test_runtime_graph_uses_only_persisted_run_events_not_a_static_topology():
     graph = read_frontend("frontend/components/AgentGraph.tsx")
-    layout = read_frontend("frontend/lib/pipeline-graph.ts")
-    css = read_frontend("frontend/app/settling-theme.css")
+    css = read_frontend("frontend/app/globals.css")
 
     assert 'data-runtime-graph="true"' in graph
-    assert 'viewBox="0 0 920 720"' in graph
+    assert "traceLogs = []" in graph
+    assert "categoryFor(log)" in graph
+    assert "Every dot is an actual event" in graph
+    assert "全量事件映射" in graph
+    assert "knowledge-graph__event" in graph
+    assert "knowledge-graph__controls" in graph
     assert "runtime-graph__surface" in graph
     assert "runtime-graph__mesh" in graph
     assert "runtime-graph__track-label" in graph
     assert "runtime-graph__trace" in graph
-    assert "事件映射" in graph
-    assert "全量事件映射" in graph
-    assert "unmappedEventCount" in graph
-    assert "runtime-graph__event-link" in graph
-    assert "runtime-graph__station-card" in graph
-    assert "runtime-graph__rail-packet" in graph
     assert "traceLogTitle" in graph
-    assert 'id: "handwriting"' in graph
-    assert 'id: "templateGate"' in graph
-    assert 'id: "excel"' in graph
-    assert 'id: "zip"' in graph
-    assert "settling-graph__node-ring" not in graph
-    assert "viewBox 920×720" in layout
-    assert "const RULES_SUB_Y = [126, 174, 222]" in layout
-    assert "const CROSS_SUB_Y = [414, 462, 510]" in layout
-    assert "const SUB_X = 650" in layout
-    assert ".runtime-graph" in css
-    assert "Runtime graph v5" in css
-    assert "--runtime-surface: #0d1117" in css
+    assert ".knowledge-graph" in css
     assert "overflow-x: auto" in css
-    assert "min-width: 0" in css
+    assert "knowledge-graph__event--evidence" in css
 
 
 def test_main_agent_panel_executes_high_risk_actions_through_proposals():
@@ -285,17 +279,19 @@ def test_main_agent_panel_executes_high_risk_actions_through_proposals():
     assert "proposal_id?: string | null" in api
 
 
-def test_project_rail_uses_status_steps_not_duplicate_navigation_links():
+def test_project_rail_has_one_concise_navigation_set_without_duplicate_stage_steps():
     rail = read_frontend("frontend/components/ProjectRail.tsx")
     zh = read_frontend("frontend/lib/i18n/zh.ts")
 
-    assert "rail-steps__item" in rail
-    assert "rail-steps__link" not in rail
+    assert "rail-steps__item" not in rail
     assert 'href: "/files"' not in rail
     assert 'href: "/risks"' not in rail
     assert 'href: "/outputs"' not in rail
     assert "当前案件" in zh
     assert "页面入口" in zh
+    assert 'overview: "案件概览"' in zh
+    assert 'files: "资料与证据"' in zh
+    assert 'findings: "审核结论"' in zh
 
 
 def test_activity_timeline_surfaces_code_level_trace_metadata():

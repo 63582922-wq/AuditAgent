@@ -7,9 +7,8 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.exceptions import FXPGError
-from app.models import AgentActionProposal, AgentRunLog, Memory
+from app.models import AgentActionProposal, AgentRunLog, LearningProposal
 from app.services.agent.agent_trace import trace_code_location
-from app.services.embedding_service import embed_memory_content
 from app.services.harness_job_service import start_harness_job
 from app.services.meeting_service import accept_meeting_deliverables, reject_meeting_deliverables
 
@@ -92,41 +91,33 @@ def approve_agent_action(
         feedback = str(payload.get("feedback_text") or payload.get("user_message") or "").strip()
         if len(feedback) < 8:
             raise FXPGError("学习提案缺少明确纠错内容", code="LEARNING_FEEDBACK_REQUIRED", status=400)
-        learning_patch = payload.get("learning_patch") if isinstance(payload.get("learning_patch"), dict) else {}
-        if learning_patch:
-            learning_patch = {**learning_patch, "approval_state": "approved"}
-            import json
-
-            content = "结构化规则反馈（用户批准）：" + json.dumps(
-                learning_patch,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
+        learning_id = str(payload.get("learning_proposal_id") or "")
+        learning = db.get(LearningProposal, learning_id) if learning_id else None
+        if learning:
+            learning.status = "approved_pending_regression"
+            learning.approved_at = datetime.now(timezone.utc)
+            db.add(learning)
         else:
-            content = f"规则反馈口径（用户批准）：{feedback}"
-        tags = [
-            "rule_feedback",
-            "user_approved",
-            "main_agent_chat",
-            "structured_policy" if learning_patch else "plain_policy",
-            f"project:{proposal.project_id}",
-            f"meeting:{proposal.meeting_id}",
-        ]
-        existing = db.query(Memory).filter_by(memory_type="rule_feedback_policy", content=content).first()
-        if not existing:
-            db.add(
-                Memory(
-                    memory_type="rule_feedback_policy",
-                    content=content,
-                    tags=tags,
-                    embedding_json=embed_memory_content(content, tags),
-                )
+            learning = LearningProposal(
+                project_id=proposal.project_id,
+                meeting_id=proposal.meeting_id,
+                feedback_text=feedback,
+                proposed_patch_json=payload.get("learning_patch") or {},
+                required_case_ids=["A1P260307357", "SMS202606090070"],
+                regression_plan_json={"status": "required"},
+                status="approved_pending_regression",
+                approved_at=datetime.now(timezone.utc),
             )
+            db.add(learning)
             db.flush()
         return _mark_executed(
             db,
             proposal,
-            _result(proposal, status="learned", message="规则学习提案已批准并写入长期记忆"),
+            _result(
+                proposal,
+                status="approved_pending_regression",
+                message="学习提案已批准，必须通过 A1P 与 SMS 基准回归后才能写入正式规则记忆。",
+            ),
         )
 
     raise FXPGError("暂不支持执行该动作", code="ACTION_UNSUPPORTED", status=400)

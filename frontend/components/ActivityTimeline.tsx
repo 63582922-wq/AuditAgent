@@ -112,6 +112,27 @@ function logMeta(
   return parts;
 }
 
+function auditDetail(detail: Record<string, unknown>) {
+  // Preserve production auditability without exposing broad raw payloads.
+  const allow = [
+    "run_id",
+    "kind",
+    "name",
+    "code_location",
+    "agent_id",
+    "tool_name",
+    "mcp",
+    "retry_attempt",
+    "retry_max",
+    "wait_sec",
+    "code",
+    "rule_outcome_counts",
+    "evidence_gate",
+    "job_id",
+  ];
+  return Object.fromEntries(allow.filter((key) => detail[key] !== undefined).map((key) => [key, detail[key]]));
+}
+
 export function pickLiveAgentMessage(logs: ActivityLog[]): string | null {
   for (let i = logs.length - 1; i >= 0; i -= 1) {
     const msg = logMessage(logs[i]!);
@@ -143,6 +164,8 @@ export function ActivityTimeline({ logs }: { logs: ActivityLog[] }) {
           Object.keys(detail).filter(
             (k) => !["kind", "name", "message", "code_location"].includes(k),
           ).length > 0;
+        const audit = auditDetail(detail);
+        const hasAudit = Object.keys(audit).length > 0;
 
         return (
           <div className="timeline__item" key={log.id}>
@@ -155,6 +178,12 @@ export function ActivityTimeline({ logs }: { logs: ActivityLog[] }) {
                   <span key={part}>{part}</span>
                 ))}
               </div>
+              {hasAudit && (
+                <details className="timeline__audit-detail">
+                  <summary>审计详情</summary>
+                  <pre>{JSON.stringify(audit, null, 2)}</pre>
+                </details>
+              )}
               {showRaw && process.env.NODE_ENV === "development" && (
                 <pre className="timeline__detail">{JSON.stringify(detail, null, 2)}</pre>
               )}

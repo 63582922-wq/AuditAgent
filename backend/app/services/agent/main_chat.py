@@ -14,6 +14,7 @@ from app.models import (
     FileRecord,
     Meeting,
     Memory,
+    LearningProposal,
     ParsedDocument,
     Project,
     Risk,
@@ -22,9 +23,11 @@ from app.schemas import AgentChatAction, AgentChatMessage, AgentChatResponse
 from app.services.agent.agent_trace import trace_code_location
 from app.services.agent import llm_client
 from app.services.agent.memory_consolidator import consolidate_chat_memories
+from app.services.agent.prompt_loader import MAIN_AGENT_PROMPT_VERSION, main_agent_system_prompt
 from app.services.embedding_service import embed_memory_content
 from app.services.memory_rag import retrieve_memories
 from app.services.output_scope import primary_output_count
+from app.services.domain.compliance.evidence_graph import fact_citations
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,7 @@ class ChatContext:
     category_counts: dict[str, int]
     findings_summary: list[dict[str, Any]]
     current_facts: dict[str, Any]
+    citations: list[dict[str, Any]]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +88,7 @@ class ChatContext:
             "category_counts": self.category_counts,
             "findings_summary": self.findings_summary,
             "current_facts": self.current_facts,
+            "citations": self.citations,
         }
 
 
@@ -111,8 +116,8 @@ ACTION_DEFS: dict[str, AgentChatAction] = {
     "review": AgentChatAction(
         id="review",
         label="逐条复核",
-        description="确认、排除或标记需补充",
-        segment="review",
+        description="在审核结论中确认、排除或标记需补充",
+        segment="risks",
         requires_meeting=True,
     ),
     "outputs": AgentChatAction(
@@ -160,7 +165,7 @@ ACTION_DEFS: dict[str, AgentChatAction] = {
         id="learn_rule_feedback",
         label="提交规则学习提案",
         description="将本次纠错整理为待审批规则/记忆变更，不会直接改全局规则",
-        segment="review",
+        segment="risks",
         requires_meeting=True,
         requires_approval=True,
         tone="warning",
@@ -395,6 +400,7 @@ def build_chat_context(
             category_counts={},
             findings_summary=[],
             current_facts={},
+            citations=[],
         )
 
     filters: dict[str, Any] = {"project_id": project.id}
@@ -418,6 +424,7 @@ def build_chat_context(
     )
 
     job = _latest_job(db, project.id, meeting.id if meeting else None)
+    citations = fact_citations(db, project.id, meeting.id, limit=12) if meeting else []
     return ChatContext(
         project_id=project.id,
         project_name=project.name,
@@ -438,6 +445,7 @@ def build_chat_context(
         category_counts=category_counts,
         findings_summary=_risk_summary(risks),
         current_facts=current_facts,
+        citations=citations,
     )
 
 
@@ -480,11 +488,26 @@ def persist_action_proposals(
         payload: dict[str, Any] = {"source": "main_agent_chat", "user_message": message}
         if action.id == "learn_rule_feedback":
             learning_patch = build_learning_patch(message, ctx)
+            learning = LearningProposal(
+                project_id=ctx.project_id,
+                meeting_id=ctx.meeting_id,
+                feedback_text=message.strip(),
+                original_conclusion="；".join(
+                    str(item.get("problem") or "") for item in ctx.findings_summary[:3] if item.get("problem")
+                )
+                or None,
+                proposed_patch_json=learning_patch,
+                required_case_ids=list(learning_patch["evaluation_gate"]["required_cases"]),
+                regression_plan_json=learning_patch["evaluation_gate"],
+            )
+            db.add(learning)
+            db.flush()
             payload.update(
                 {
                     "proposal_type": "rule_memory_patch",
                     "feedback_text": message.strip(),
                     "learning_patch": learning_patch,
+                    "learning_proposal_id": learning.id,
                     "requires_evaluation": True,
                     "approval_required_reason": "用户纠错可能改变后续同类案件研判，需先审批并保留回滚依据",
                 }
@@ -503,6 +526,44 @@ def persist_action_proposals(
         db.refresh(proposal)
         next_actions.append(action.model_copy(update={"proposal_id": proposal.id}))
     return next_actions
+
+
+def classify_chat_intent(message: str) -> str:
+    if _is_correction_feedback(message):
+        return "learning_feedback"
+    if _contains_any(message, ["删除", "验收", "退回", "重跑", "重新分析", "上传", "补充资料", "执行", "处理"]):
+        return "operation"
+    if _contains_any(message, ["分析", "核对", "比较", "检查", "识别", "提取", "统计"]):
+        return "analysis_request"
+    return "consult"
+
+
+def submit_agent_feedback(
+    db: Session,
+    *,
+    feedback: str,
+    project_id: str,
+    meeting_id: str | None = None,
+    original_conclusion: str | None = None,
+) -> LearningProposal:
+    value = feedback.strip()
+    if len(value) < 8:
+        raise HTTPException(400, "请提供具体的纠错依据或后续规则")
+    ctx = build_chat_context(db, project_id, meeting_id, value)
+    patch = build_learning_patch(value, ctx)
+    proposal = LearningProposal(
+        project_id=project_id,
+        meeting_id=meeting_id,
+        feedback_text=value,
+        original_conclusion=original_conclusion,
+        proposed_patch_json=patch,
+        required_case_ids=list(patch["evaluation_gate"]["required_cases"]),
+        regression_plan_json=patch["evaluation_gate"],
+    )
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    return proposal
 
 
 def build_learning_patch(message: str, ctx: ChatContext) -> dict[str, Any]:
@@ -669,20 +730,7 @@ def llm_reply(message: str, history: list[AgentChatMessage], ctx: ChatContext) -
     if not llm_client.llm_available():
         return None
 
-    system = (
-        "你是 AuditAgent 的主 Agent，对话对象是会议合规远程观察系统用户。"
-        "你必须用中文直接回答，可以解释当前状态、证据链、缺资料、复核、交付验收和下一步。"
-        "当前系统上下文 JSON 中的 meeting_case、present_categories、missing_documents、category_counts、findings_summary、current_facts 是本场案件的权威事实源。"
-        "reference_memories 只能作为用户偏好或已审批规则参考，绝不能覆盖当前案件事实。"
-        "如果 missing_documents 为空，不要声称系统缺资料；如果 present_categories 包含 sign_in_record 或 current_facts.has_sign_in_record 为 true，不要声称缺签到表。"
-        "如果用户询问图片识别、手写、OCR 或置信度，必须引用 current_facts.vision_manual_review_count、vision_consensus_needs_review_count、vision_review_reasons 和 vision_review_files。"
-        "证明会议真实举办的证据可以来自线上会议截图、沟通短信、现场确认单、签到记录、议程等组合证据，不要固定要求现场照片。"
-        "A1 会议导出用于计划信息、预算、讲者、参会人、会议状态和固定模板填报，不等同于现场照片。"
-        "固定模板交付物是 output_type=fixed_template_excel、文件名固定模板输出.xlsx；ZIP 归档包是 output_type=deliverable_package。原始 A1 会议导出和观察确认单是资料，不是固定模板交付物。"
-        "不要声称已经执行上传、删除、验收、退回、重跑等高影响动作；这些动作只能作为建议。"
-        "如果资料不足，明确建议补充资料，不要编造通过结论。"
-        "回答保持简洁、可操作。不要使用 Markdown、表格或代码块。"
-    )
+    system = main_agent_system_prompt()
     context_text = json.dumps(ctx.as_dict(), ensure_ascii=False, default=str)
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system},
@@ -701,7 +749,15 @@ def llm_reply(message: str, history: list[AgentChatMessage], ctx: ChatContext) -
     return clean_agent_reply(reply) or None
 
 
-def record_chat(db: Session, ctx: ChatContext, message: str, reply: str, actions: list[AgentChatAction], mode: str) -> None:
+def record_chat(
+    db: Session,
+    ctx: ChatContext,
+    message: str,
+    reply: str,
+    actions: list[AgentChatAction],
+    mode: str,
+    intent: str,
+) -> None:
     if not ctx.project_id:
         return
     db.add(
@@ -717,6 +773,8 @@ def record_chat(db: Session, ctx: ChatContext, message: str, reply: str, actions
                 "user_message": message,
                 "actions": [a.model_dump() for a in actions],
                 "mode": mode,
+                "intent": intent,
+                "citations": ctx.citations,
                 "code_location": trace_code_location(),
             },
         )
@@ -737,6 +795,7 @@ def run_main_agent_chat(
         raise HTTPException(400, "消息不能为空")
 
     ctx = build_chat_context(db, project_id, meeting_id, value)
+    intent = classify_chat_intent(value)
     actions = suggest_actions(value, ctx)
     actions = persist_action_proposals(db, ctx, value, actions)
     memory_write = persist_chat_memory(db, ctx, value)
@@ -747,8 +806,18 @@ def run_main_agent_chat(
     mode = "governed_feedback" if governed_feedback else ("fallback" if deterministic_delivery else ("llm" if reply else "fallback"))
     if governed_feedback or not reply:
         reply = fallback_reply(value, ctx)
-    record_chat(db, ctx, value, reply, actions, mode)
+    record_chat(db, ctx, value, reply, actions, mode, intent)
     context = ctx.as_dict()
+    context["prompt_version"] = MAIN_AGENT_PROMPT_VERSION
     context["memory_write"] = memory_write.as_dict()
     context["memory_consolidation"] = memory_consolidation.as_dict()
-    return AgentChatResponse(reply=reply, actions=actions, mode=mode, context=context)
+    return AgentChatResponse(
+        reply=reply,
+        answer=reply,
+        actions=actions,
+        planned_actions=actions,
+        citations=ctx.citations,
+        intent=intent,
+        mode=mode,
+        context=context,
+    )

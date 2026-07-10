@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import FileRecord, Meeting, ParsedDocument, Project, Risk
+from app.models import CaseRun, FileRecord, Meeting, ParsedDocument, Project, Risk
 from app.services.agent.agent_trace import AgentTrace
 from app.services.agent.orchestrator import MissionOrchestrator
 from app.services.agent.runtime import AgentRuntime
@@ -27,6 +27,12 @@ from app.services.evaluation.compliance_eval import (
 )
 from app.services.meeting_service import sync_project_rollups
 from app.services.parsed_document_store import upsert_parsed_document
+from app.services.agent.case_run import create_case_run, finish_case_run, mark_case_run_started
+from app.services.domain.compliance.evidence_graph import (
+    apply_fact_decisions,
+    evidence_gate,
+    materialize_evidence_graph,
+)
 
 
 @dataclass
@@ -52,6 +58,7 @@ class ComplianceHarness:
         self.progress_callback = progress_callback
         self.trace = AgentTrace(db, "")
         self._last_pct = 0
+        self.run_id: str | None = None
 
     def _meeting(self, project_id: str, meeting_id: str) -> Meeting:
         meeting = self.db.get(Meeting, meeting_id)
@@ -193,14 +200,40 @@ class ComplianceHarness:
         parsed_docs = workflow._load_parsed_docs_from_db()
 
         facts = build_case_facts(meeting_profile, files, parsed_docs)
+        if self.run_id:
+            decisions = materialize_evidence_graph(
+                self.db,
+                run_id=self.run_id,
+                project_id=project_id,
+                meeting_id=meeting_id,
+                facts=facts,
+            )
+            facts = apply_fact_decisions(facts, decisions)
+            state["evidence_gate"] = evidence_gate(decisions, self._present_categories(files))
+            self.trace.log(
+                "evidence_graph",
+                "completed",
+                kind="evidence",
+                name="事实证据账本",
+                message=f"已裁决 {len(decisions)} 项事实，冲突 {sum(1 for item in decisions if item.status == 'conflict')} 项",
+                detail={
+                    "decision_count": len(decisions),
+                    "accepted_count": sum(1 for item in decisions if item.status == "accepted"),
+                    "conflict_count": sum(1 for item in decisions if item.status == "conflict"),
+                    "needs_review_count": sum(1 for item in decisions if item.status == "needs_review"),
+                    "evidence_gate": state["evidence_gate"],
+                },
+            )
         rules = self._load_compliance_rules(workflow)
-        hits = run_compliance_checks(facts, rules)
+        hits, rule_outcomes = run_compliance_checks(facts, rules, return_outcomes=True)
         obs_type = str(meeting_profile.get("observation_type") or "远程观察")
         adjudicated = generate_finding_narratives(hits, {**meeting_profile, **facts}, obs_type)
 
         self._update_meeting_state(
             meeting,
             meeting_case=_json_safe({**meeting_profile, **facts, "finding_count": len(adjudicated)}),
+            evidence_gate=state.get("evidence_gate"),
+            rule_outcomes=_json_safe(rule_outcomes),
         )
         self.db.commit()
 
@@ -209,7 +242,29 @@ class ComplianceHarness:
             "completed",
             kind="harness",
             message=f"合规规则命中 {len(adjudicated)} 项",
-            detail={"facts": facts, "hits": len(hits)},
+            detail={
+                "facts": facts,
+                "hits": len(hits),
+                "evidence_gate": state.get("evidence_gate"),
+                "rule_outcome_counts": {
+                    status: sum(1 for item in rule_outcomes if item.get("status") == status)
+                    for status in ("passed", "finding", "needs_review", "not_applicable")
+                },
+            },
+        )
+        self.trace.log(
+            "rule_outcomes",
+            "completed",
+            kind="validation",
+            name="CMP 规则裁决",
+            message="规则结果已写入审核结论",
+            detail={
+                "rule_outcome_counts": {
+                    status: sum(1 for item in rule_outcomes if item.get("status") == status)
+                    for status in ("passed", "finding", "needs_review", "not_applicable")
+                },
+                "evidence_gate": state.get("evidence_gate"),
+            },
         )
         return adjudicated
 
@@ -369,6 +424,12 @@ class ComplianceHarness:
         deliverable.setdefault("status", "pending")
         deliverable.setdefault("comment", "")
         deliverable["evaluation"] = compact_compliance_evaluation(report)
+        evidence_state = state.get("evidence_gate") if isinstance(state.get("evidence_gate"), dict) else {}
+        if evidence_state.get("blocked"):
+            deliverable["status"] = "needs_review"
+            deliverable["evidence_gate"] = evidence_state
+            deliverable["comment"] = "关键事实存在冲突或缺少直接证据，当前仅生成待复核预览交付物。"
+            meeting.status = "needs_review"
         if (
             report.get("status") == "completed"
             and report.get("passed") is False
@@ -431,9 +492,20 @@ class ComplianceHarness:
         meeting_id: str,
         *,
         skip_orchestrator: bool = False,
+        case_run_id: str | None = None,
     ) -> HarnessResult:
         """对单个子会议运行完整 Harness。"""
-        self.trace = AgentTrace(self.db, project_id, meeting_id)
+        case_run = self.db.get(CaseRun, case_run_id) if case_run_id else None
+        if not case_run:
+            case_run = create_case_run(
+                self.db,
+                project_id,
+                meeting_id,
+                execution_mode="compliance_harness",
+            )
+        self.run_id = case_run.id
+        mark_case_run_started(self.db, case_run)
+        self.trace = AgentTrace(self.db, project_id, meeting_id, run_id=case_run.id)
         meeting = self._meeting(project_id, meeting_id)
 
         pack = get_domain_pack(project=self.db.get(Project, project_id))
@@ -448,6 +520,7 @@ class ComplianceHarness:
             meeting_case=state["meeting_case"],
             agent_domain="compliance",
             execution_mode="compliance_harness",
+            active_run_id=case_run.id,
         )
         self.db.commit()
 
@@ -492,11 +565,24 @@ class ComplianceHarness:
 
         self._emit_progress(project_id, meeting_id, "completed", 100)
 
+        meeting = self._meeting(project_id, meeting_id)
         meeting_case = ((meeting.state_json or {}).get("meeting_case") or {}) if meeting else {}
+        final_status = meeting.status if meeting else post.status
+        finish_case_run(
+            self.db,
+            case_run,
+            status=final_status,
+            result={
+                "meeting_code": meeting_case.get("meeting_code"),
+                "finding_count": len(findings),
+                "evidence_gate": (meeting.state_json or {}).get("evidence_gate") if meeting else {},
+                "deliverable": meeting.deliverable_json if meeting else {},
+            },
+        )
         return HarnessResult(
             project_id=project_id,
             meeting_id=meeting_id,
-            status=post.status,
+            status=final_status,
             meeting_code=str(meeting_case.get("meeting_code") or meeting.meeting_code if meeting else ""),
             finding_count=len(findings),
             meeting_case=meeting_case,

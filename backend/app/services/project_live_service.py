@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import AgentRunLog, AnalysisJob, FileRecord, Project, Risk
+from app.services.agent.case_run import latest_case_run
 from app.schemas import ProjectLiveOut
 from app.services.meeting_service import get_meeting
 from app.services.output_scope import primary_output_count
@@ -98,6 +99,8 @@ def compact_live_state(state_json: dict | None, deliverable_json: dict | None = 
         "present_categories",
         "category_counts",
         "missing_documents",
+        "active_run_id",
+        "evidence_gate",
     )
     for key in passthrough_keys:
         if key in state:
@@ -144,6 +147,13 @@ def build_meeting_live(db: Session, project_id: str, meeting_id: str) -> Project
     meeting = get_meeting(db, project_id, meeting_id)
     state_json = dict(meeting.state_json or {})
     state_json.setdefault("category_counts", _category_counts(db, project_id=project_id, meeting_id=meeting_id))
+    if run := latest_case_run(db, project_id, meeting_id):
+        state_json["active_run"] = {
+            "id": run.id,
+            "status": run.status,
+            "run_kind": run.run_kind,
+            "created_at": run.created_at.isoformat() + "Z" if run.created_at else None,
+        }
     return ProjectLiveOut(
         id=project.id,
         name=f"{project.name} · {meeting.meeting_code}",

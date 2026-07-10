@@ -17,6 +17,9 @@ from app.exceptions import FXPGError
 from app.models import (
     AgentRunLog,
     AnalysisJob,
+    CaseRun,
+    EvidenceClaim,
+    FactDecision,
     ExtractedEntity,
     FileRecord,
     Meeting,
@@ -33,6 +36,8 @@ from app.schemas import (
     AnalyzeResponse,
     AgentActionApproveRequest,
     AgentActionApproveResponse,
+    AgentFeedbackRequest,
+    AgentFeedbackResponse,
     AgentChatRequest,
     AgentChatResponse,
     FileOut,
@@ -80,7 +85,7 @@ from app.services.harness_job_service import start_harness_job
 from app.services.agent.memory_writer import write_review_memory
 from app.services.agent.llm_client import llm_available, require_agent_llm
 from app.services.agent.action_executor import approve_agent_action
-from app.services.agent.main_chat import run_main_agent_chat
+from app.services.agent.main_chat import run_main_agent_chat, submit_agent_feedback
 from app.services.domain.registry import get_domain_pack, resolve_agent_domain
 from app.services.jobs.worker import create_job, enqueue_analysis, enqueue_harness
 from app.services.project_live_service import (
@@ -92,6 +97,8 @@ from app.services.project_live_service import (
     list_project_logs as load_project_logs,
 )
 from app.services.output_scope import primary_output_count, primary_outputs
+from app.services.agent.case_run import latest_case_run
+from app.services.agent.run_events import build_run_events_snapshot
 from app.services.seed import seed_memories, seed_rules
 
 router = APIRouter(dependencies=[Depends(require_api_key)])
@@ -164,6 +171,47 @@ def approve_agent_action_route(
     db: Session = Depends(get_db),
 ):
     return approve_agent_action(db, proposal_id, comment=(payload.comment if payload else None))
+
+
+@router.post("/agent/feedback", response_model=AgentFeedbackResponse)
+def agent_feedback(payload: AgentFeedbackRequest, db: Session = Depends(get_db)):
+    proposal = submit_agent_feedback(
+        db,
+        feedback=payload.feedback,
+        project_id=payload.project_id,
+        meeting_id=payload.meeting_id,
+        original_conclusion=payload.original_conclusion,
+    )
+    return AgentFeedbackResponse(
+        ok=True,
+        proposal_id=proposal.id,
+        status=proposal.status,
+        message="已记录为待审批学习提案；未通过基准回归前不会改变正式规则。",
+    )
+
+
+def _cancel_job(db: Session, project_id: str, job_id: str, meeting_id: str | None = None) -> AnalysisJob:
+    job = db.get(AnalysisJob, job_id)
+    if not job or job.project_id != project_id or (meeting_id is not None and job.meeting_id != meeting_id):
+        raise HTTPException(404, "任务不存在")
+    if job.status in {"completed", "failed", "cancelled"}:
+        raise FXPGError("任务已结束，不能取消", code="JOB_TERMINAL", status=409)
+    job.status = "cancel_requested"
+    job.current_step = "cancel_requested"
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+@router.post("/projects/{project_id}/jobs/{job_id}/cancel", response_model=JobOut)
+def cancel_project_job(project_id: str, job_id: str, db: Session = Depends(get_db)):
+    return _cancel_job(db, project_id, job_id)
+
+
+@router.post("/projects/{project_id}/meetings/{meeting_id}/jobs/{job_id}/cancel", response_model=JobOut)
+def cancel_meeting_job(project_id: str, meeting_id: str, job_id: str, db: Session = Depends(get_db)):
+    get_meeting(db, project_id, meeting_id)
+    return _cancel_job(db, project_id, job_id, meeting_id)
 
 
 @router.post("/projects", response_model=ProjectOut)
@@ -657,6 +705,10 @@ def _delete_project_child_rows(db: Session, project_id: str) -> None:
     inspector = inspect(db.get_bind())
     ordered = [
         "review_records",
+        "evidence_claims",
+        "fact_decisions",
+        "learning_proposals",
+        "case_runs",
         "supplement_requests",
         "evidence_gaps",
         "audit_check_results",
@@ -731,6 +783,86 @@ def list_meeting_outputs(project_id: str, meeting_id: str, db: Session = Depends
 @router.get("/projects/{project_id}/meetings/{meeting_id}/logs", response_model=list)
 def list_meeting_logs(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
     return load_meeting_logs(db, project_id, meeting_id)
+
+
+@router.get("/projects/{project_id}/meetings/{meeting_id}/runs")
+def list_meeting_runs(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    get_meeting(db, project_id, meeting_id)
+    rows = (
+        db.query(CaseRun)
+        .filter_by(project_id=project_id, meeting_id=meeting_id)
+        .order_by(CaseRun.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "job_id": row.job_id,
+            "status": row.status,
+            "run_kind": row.run_kind,
+            "execution_mode": row.execution_mode,
+            "input_snapshot": row.input_snapshot_json,
+            "runtime_snapshot": row.runtime_snapshot_json,
+            "result": row.result_json,
+            "error_message": row.error_message,
+            "created_at": row.created_at,
+            "started_at": row.started_at,
+            "finished_at": row.finished_at,
+        }
+        for row in rows
+    ]
+
+
+@router.get("/projects/{project_id}/meetings/{meeting_id}/evidence")
+def meeting_evidence(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    get_meeting(db, project_id, meeting_id)
+    run = latest_case_run(db, project_id, meeting_id)
+    if not run:
+        return {"run_id": None, "claims": [], "facts": [], "gate": {"blocked": False, "reason": "no_run"}}
+    claims = db.query(EvidenceClaim).filter_by(run_id=run.id).order_by(EvidenceClaim.created_at).all()
+    facts = db.query(FactDecision).filter_by(run_id=run.id).order_by(FactDecision.fact_key).all()
+    meeting = get_meeting(db, project_id, meeting_id)
+    return {
+        "run_id": run.id,
+        "claims": [
+            {
+                "id": claim.id,
+                "fact_key": claim.claim_key,
+                "value": claim.value_json,
+                "file_id": claim.file_id,
+                "page_number": claim.page_number,
+                "region": claim.region_json,
+                "confidence": claim.confidence,
+                "status": claim.status,
+                "evidence": claim.evidence_text,
+                "source_kind": claim.source_kind,
+            }
+            for claim in claims
+        ],
+        "facts": [
+            {
+                "fact_key": fact.fact_key,
+                "value": fact.value_json,
+                "status": fact.status,
+                "confidence": fact.confidence,
+                "sources": fact.source_summary_json,
+                "conflicts": fact.conflict_json,
+            }
+            for fact in facts
+        ],
+        "gate": (meeting.state_json or {}).get("evidence_gate") or {"blocked": False, "reason": "not_evaluated"},
+    }
+
+
+@router.get("/projects/{project_id}/meetings/{meeting_id}/run-events")
+def meeting_run_events(project_id: str, meeting_id: str, db: Session = Depends(get_db)):
+    get_meeting(db, project_id, meeting_id)
+    return build_run_events_snapshot(
+        db,
+        project_id=project_id,
+        meeting_id=meeting_id,
+        run=latest_case_run(db, project_id, meeting_id),
+    )
 
 
 @router.post("/projects/{project_id}/meetings/{meeting_id}/regenerate-outputs")

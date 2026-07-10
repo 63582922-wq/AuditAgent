@@ -183,7 +183,47 @@ def build_case_facts(
     return facts
 
 
-def run_compliance_checks(facts: Dict[str, Any], rules: List[dict]) -> List[dict]:
+def _rule_outcome(
+    rule: dict,
+    status: str,
+    *,
+    reason: str | None = None,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return an auditable rule result even when it is not a Finding.
+
+    A compliance run used to persist only triggered rules.  That made a silent
+    default value indistinguishable from a verified pass.  Keeping an outcome
+    for every applicable rule gives the UI, the delivery gate and the Main
+    Agent a stable four-state contract: pass, finding, needs_review, or N/A.
+    """
+    return {
+        "rule_id": rule.get("rule_id"),
+        "rule_name": rule.get("rule_name"),
+        "status": status,
+        "reason": reason,
+        "evidence": evidence or {},
+    }
+
+
+def _uncertain_rule_fields(facts: Dict[str, Any], rule: dict) -> dict[str, str]:
+    statuses = facts.get("_evidence_status")
+    if not isinstance(statuses, dict):
+        return {}
+    uncertain: dict[str, str] = {}
+    for field in rule.get("evidence_fields", []) or []:
+        state = statuses.get(field)
+        if state in {"conflict", "needs_review", "missing"}:
+            uncertain[str(field)] = str(state)
+    return uncertain
+
+
+def run_compliance_checks(
+    facts: Dict[str, Any],
+    rules: List[dict],
+    *,
+    return_outcomes: bool = False,
+) -> List[dict] | tuple[List[dict], List[dict]]:
     from app.services.rule_engine import evaluate_condition
 
     row = {**facts}
@@ -192,21 +232,43 @@ def run_compliance_checks(facts: Dict[str, Any], rules: List[dict]) -> List[dict
             row[k] = "true" if v else "false"
 
     hits: List[dict] = []
+    outcomes: List[dict] = []
     for rule in rules:
         if not rule.get("enabled", True):
             continue
         rule_id = str(rule.get("rule_id") or "")
         meeting_code = str(facts.get("meeting_code") or "")
         if rule_id == "CMP-004" and meeting_code.startswith("SMS"):
+            outcomes.append(_rule_outcome(rule, "not_applicable", reason="SMS 会议不适用该检查"))
             continue
         if rule_id == "CMP-005" and facts.get("material_code_pending_vision"):
+            outcomes.append(_rule_outcome(rule, "needs_review", reason="材料编码仍待视觉识别确认"))
             continue
         if rule_id == "CMP-006" and facts.get("attendance_source") == "watch_record":
+            outcomes.append(_rule_outcome(rule, "not_applicable", reason="观看记录不等同于签到记录"))
             continue
         cond = rule.get("condition_json") or rule.get("condition")
         if not cond:
+            outcomes.append(_rule_outcome(rule, "not_applicable", reason="规则未配置可执行条件"))
+            continue
+        evidence = {
+            f: facts.get(f)
+            for f in rule.get("evidence_fields", [])
+            if facts.get(f) is not None
+        }
+        uncertain = _uncertain_rule_fields(facts, rule)
+        if uncertain:
+            outcomes.append(
+                _rule_outcome(
+                    rule,
+                    "needs_review",
+                    reason="关键证据存在冲突、低置信或待核实状态",
+                    evidence={**evidence, "_evidence_status": uncertain},
+                )
+            )
             continue
         if evaluate_condition(row, cond):
+            outcomes.append(_rule_outcome(rule, "finding", evidence=evidence))
             hits.append(
                 {
                     "risk_id": rule["rule_id"],
@@ -215,9 +277,13 @@ def run_compliance_checks(facts: Dict[str, Any], rules: List[dict]) -> List[dict
                     "problem": rule["rule_name"],
                     "suggestion": rule["suggestion_template"],
                     "rule_triggered": rule["rule_id"],
-                    "evidence_json": {f: facts.get(f) for f in rule.get("evidence_fields", []) if facts.get(f) is not None},
+                    "evidence_json": evidence,
                     "manual_review_required": rule.get("manual_review_required", False),
                     "confidence": 0.92,
                 }
             )
+        else:
+            outcomes.append(_rule_outcome(rule, "passed", evidence=evidence))
+    if return_outcomes:
+        return hits, outcomes
     return hits

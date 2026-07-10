@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { Block, PageTop } from "@/components/PageChrome";
 import { useProjectLiveOptional } from "@/contexts/ProjectLiveContext";
-import { api } from "@/lib/api";
+import { fetchMeetingRunEvents } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useDocumentVisible } from "@/lib/useDocumentVisible";
 import { isPipelineRunning } from "@/lib/workflow";
@@ -29,10 +29,25 @@ export default function MeetingLogsPage() {
   const running = isPipelineRunning(liveCtx?.live?.status ?? "", liveCtx?.job?.status);
 
   useEffect(() => {
-    const path = `/projects/${id}/meetings/${meetingId}/logs`;
-    api<Log[]>(path).then(setLogs).catch(console.error);
+    const load = () => {
+      void fetchMeetingRunEvents(id, meetingId)
+        .then((snapshot) => {
+          setLogs(
+            snapshot.events.map((event) => ({
+              id: event.id,
+              step: event.step,
+              status: event.status,
+              detail_json: event.detail,
+              duration_ms: event.duration_ms ?? undefined,
+              created_at: event.created_at || new Date().toISOString(),
+            })),
+          );
+        })
+        .catch(console.error);
+    };
+    load();
     if (!documentVisible || !running) return;
-    const poll = setInterval(() => api<Log[]>(path).then(setLogs).catch(console.error), 4000);
+    const poll = setInterval(load, 4000);
     return () => clearInterval(poll);
   }, [documentVisible, id, meetingId, running]);
 

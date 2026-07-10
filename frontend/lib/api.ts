@@ -169,6 +169,20 @@ export type ProjectStateJson = {
     progress?: number;
     sub_agents?: { id: string; name: string; station: string; agent_say?: string }[];
   };
+  rule_outcomes?: {
+    rule_id?: string;
+    rule_name?: string;
+    status?: "passed" | "finding" | "needs_review" | "not_applicable" | string;
+    reason?: string | null;
+    evidence?: Record<string, unknown>;
+  }[];
+  evidence_gate?: {
+    blocked?: boolean;
+    reason?: string;
+    required_fact_keys?: string[];
+    blocked_fact_keys?: string[];
+    conflict_fact_keys?: string[];
+  };
   mission?: {
     objective?: string;
     tasks?: { id: string; title: string; assignee_name: string }[];
@@ -432,9 +446,26 @@ export type AgentChatAction = {
   tone?: "default" | "warning";
 };
 
+export type AgentCitation = {
+  fact_key: string;
+  value: unknown;
+  status: "accepted" | "conflict" | "needs_review" | "missing" | string;
+  confidence: number;
+  source: {
+    file_id?: string | null;
+    page_number?: number | null;
+    evidence?: string | null;
+    source_kind?: string | null;
+  };
+};
+
 export type AgentChatResponse = {
   reply: string;
+  answer?: string;
   actions: AgentChatAction[];
+  planned_actions?: AgentChatAction[];
+  citations?: AgentCitation[];
+  intent?: "consult" | "analysis_request" | "operation" | "learning_feedback" | string;
   mode: "llm" | "fallback" | string;
   context: Record<string, unknown>;
 };
@@ -465,6 +496,25 @@ export function approveAgentAction(proposalId: string, comment?: string) {
   return api<AgentActionApproveResponse>(`/agent/actions/${proposalId}/approve`, {
     method: "POST",
     body: JSON.stringify(trimmedComment ? { comment: trimmedComment } : {}),
+  });
+}
+
+export type AgentFeedbackResponse = {
+  ok: boolean;
+  proposal_id: string;
+  status: string;
+  message: string;
+};
+
+export function submitAgentFeedback(payload: {
+  feedback: string;
+  project_id: string;
+  meeting_id?: string | null;
+  original_conclusion?: string;
+}) {
+  return api<AgentFeedbackResponse>("/agent/feedback", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
@@ -550,6 +600,44 @@ export function fetchMeetingRunEvents(projectId: string, meetingId: string) {
     if (isLegacyApiError(e) || isNetworkError(e)) return emptyRunEventsSnapshot(projectId, meetingId);
     throw e;
     });
+}
+
+export type EvidenceFact = {
+  fact_key: string;
+  value: unknown;
+  status: "accepted" | "conflict" | "needs_review" | "missing" | string;
+  confidence: number;
+  sources: Record<string, unknown>;
+  conflicts?: unknown[] | null;
+};
+
+export type MeetingEvidenceSnapshot = {
+  run_id: string | null;
+  claims: {
+    id: string;
+    fact_key: string;
+    value: unknown;
+    file_id?: string | null;
+    page_number?: number | null;
+    confidence: number;
+    status: string;
+    evidence?: string | null;
+    source_kind: string;
+  }[];
+  facts: EvidenceFact[];
+  gate: {
+    blocked: boolean;
+    reason: string;
+    required_fact_keys?: string[];
+    blocked_fact_keys?: string[];
+    conflict_fact_keys?: string[];
+  };
+};
+
+export function fetchMeetingEvidence(projectId: string, meetingId: string) {
+  return api<MeetingEvidenceSnapshot>(`/projects/${projectId}/meetings/${meetingId}/evidence`, {
+    cache: "no-store",
+  });
 }
 
 export function cancelJob(projectId: string, jobId: string, meetingId?: string) {
